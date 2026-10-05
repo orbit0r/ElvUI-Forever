@@ -1,0 +1,9 @@
+## Title: |cff1784d1ElvUI|r |cfd9b9b9bOptions|r
+## Notes: Powers the configuration window.|n|cffff3333Does not store any profile data.|r
+## Author: Elv, Simpy
+## Version: 1.0.0
+## Interface: 38001
+## RequiredDeps: ElvUI
+## LoadOnDemand: 1
+
+Game\load.xml

@@ -1,0 +1,1206 @@
+local E, L, V, P, G = unpack(ElvUI)
+local NP = E:GetModule('NamePlates')
+local UF = E:GetModule('UnitFrames')
+local LSM = E.Libs.LSM
+local ElvUF = E.oUF
+
+local _G = _G
+local pcall, hooksecurefunc = pcall, hooksecurefunc
+local next, strsplit, tonumber = next, strsplit, tonumber
+local pairs, wipe, tinsert = pairs, wipe, tinsert
+
+local CreateFrame = CreateFrame
+local IsInInstance = IsInInstance
+local IsResting = IsResting
+local UIParent = UIParent
+local UnitClass = UnitClass
+local UnitClassification = UnitClassification
+local UnitCreatureType = UnitCreatureType
+local UnitFactionGroup = UnitFactionGroup
+local UnitGUID = UnitGUID
+local UnitIsBattlePet = UnitIsBattlePet
+local UnitIsEnemy = UnitIsEnemy
+local UnitIsFriend = UnitIsFriend
+local UnitIsGameObject = UnitIsGameObject
+local UnitIsPlayer = UnitIsPlayer
+local UnitIsPVPSanctuary = UnitIsPVPSanctuary
+local UnitName = UnitName
+local UnitReaction = UnitReaction
+local UnitWidgetSet = UnitWidgetSet
+
+local UnitNameplateShowsWidgetsOnly = UnitNameplateShowsWidgetsOnly
+
+local C_NamePlate_GetNamePlateForUnit = C_NamePlate.GetNamePlateForUnit
+local C_NamePlate_SetNamePlateEnemySize = C_NamePlate.SetNamePlateEnemySize
+local C_NamePlate_SetNamePlateFriendlySize = C_NamePlate.SetNamePlateFriendlySize
+local C_NamePlate_SetNamePlateSelfSize = C_NamePlate.SetNamePlateSelfSize
+local C_NamePlate_GetNamePlates = C_NamePlate.GetNamePlates
+
+local GetCVarDefault = C_CVar.GetCVarDefault
+local GetCVar = C_CVar.GetCVar
+
+local POWERTYPE_ALTERNATE = Enum.PowerType.Alternate or 10
+
+local Blacklist = {
+	PLAYER = { enable = true, health = { enable = true }, },
+	ENEMY_PLAYER = { enable = true, health = { enable = true }, },
+	FRIENDLY_PLAYER = { enable = true, health = { enable = true }, },
+	ENEMY_NPC = { enable = true, health = { enable = true }, },
+	FRIENDLY_NPC = { enable = true, health = { enable = true }, },
+}
+
+function NP:ResetAuraPriority()
+	for unitType, content in pairs(E.db.nameplates.units) do
+		local default = P.nameplates.units[unitType]
+		if default then
+			local buffs = content.buffs
+			if buffs and buffs.filters then
+				buffs.filters.priority = default.buffs.filters.priority
+			end
+
+			local debuffs = content.debuffs
+			if debuffs and debuffs.filters then
+				debuffs.filters.priority = default.debuffs.filters.priority
+			end
+
+			for key in next, E.AuraDefaults do
+				if buffs then
+					buffs[key] = default.buffs[key]
+				end
+
+				if debuffs then
+					debuffs[key] = default.debuffs[key]
+				end
+			end
+		end
+	end
+end
+
+function NP:ResetSettings(unit)
+	E:CopyTable(NP.db.units[unit], P.nameplates.units[unit])
+end
+
+function NP:CopySettings(from, to)
+	if from == to then
+		E:Print(L["You cannot copy settings from the same unit."])
+		return
+	end
+
+	E:CopyTable(NP.db.units[to], E:FilterTableFromBlacklist(NP.db.units[from], Blacklist[to]))
+end
+
+do
+	local empty = {}
+	function NP:PlateDB(nameplate)
+		return (nameplate and NP.db.units[nameplate.frameType]) or empty
+	end
+end
+
+function NP:CVarReset()
+	-- not in options
+	E:SetCVar('nameplateSelfAlpha', 1)
+	E:SetCVar('nameplateMinScaleDistance', 0)
+	E:SetCVar('nameplateMaxScaleDistance', 40)
+	E:SetCVar('nameplateTargetBehindMaxDistance', 40)
+	E:SetCVar('nameplateMaxAlphaDistance', GetCVarDefault('nameplateMaxAlphaDistance'))
+	E:SetCVar('nameplateMinAlphaDistance', GetCVarDefault('nameplateMinAlphaDistance'))
+	E:SetCVar('nameplateOccludedAlphaMult', GetCVarDefault('nameplateOccludedAlphaMult'))
+	E:SetCVar('nameplateOtherAtBase', GetCVarDefault('nameplateOtherAtBase'))
+
+	-- listed in options
+	E:SetCVar('nameplateMaxAlpha', 1)
+	E:SetCVar('nameplateMaxScale', 1)
+	E:SetCVar('nameplateMinAlpha', 1)
+	E:SetCVar('nameplateMinScale', 1)
+	E:SetCVar('nameplateLargerScale', 1)
+	E:SetCVar('nameplateSelectedAlpha', 1)
+	E:SetCVar('nameplateSelectedScale', 1)
+	E:SetCVar('nameplatePlayerLargerScale', 1.8)
+
+	if not E.Retail then
+		-- listed in options
+		E:SetCVar('nameplateNotSelectedAlpha', 1)
+
+		-- not in options
+		E:SetCVar('nameplateSelfScale', 1)
+		E:SetCVar('nameplateGlobalScale', 1)
+		E:SetCVar('NamePlateHorizontalScale', 1)
+		E:SetCVar('nameplateClassResourceTopInset', GetCVarDefault('nameplateClassResourceTopInset'))
+		E:SetCVar('nameplateLargeBottomInset', GetCVarDefault('nameplateLargeBottomInset'))
+		E:SetCVar('nameplateLargeTopInset', GetCVarDefault('nameplateLargeTopInset'))
+		E:SetCVar('nameplateMotionSpeed', GetCVarDefault('nameplateMotionSpeed'))
+		E:SetCVar('nameplateResourceOnTarget', GetCVarDefault('nameplateResourceOnTarget'))
+		E:SetCVar('nameplateSelfBottomInset', GetCVarDefault('nameplateSelfBottomInset'))
+		E:SetCVar('nameplateSelfTopInset', GetCVarDefault('nameplateSelfTopInset'))
+	end
+end
+
+function NP:ToggleCVar(cvar, enabled)
+	E:SetCVar(cvar, enabled and 1 or 0)
+end
+
+function NP:CombatCVar(cvar, option, switch)
+	if option == 'TOGGLE_ON' then
+		E:SetCVar(cvar, switch and 1 or 0)
+	elseif option == 'TOGGLE_OFF' then
+		E:SetCVar(cvar, switch and 0 or 1)
+	end
+end
+
+function NP:SetCVars()
+	local db = NP.db
+
+	if not E.Retail then
+		if db.clampToScreen then
+			E:SetCVar('nameplateOtherTopInset', 0.08)
+			E:SetCVar('nameplateOtherBottomInset', 0.1)
+			E:SetCVar('clampTargetNameplateToScreen', 1)
+		elseif GetCVar('nameplateOtherTopInset') == '0.08' and GetCVar('nameplateOtherBottomInset') == '0.1' then
+			E:SetCVar('nameplateOtherTopInset', -1)
+			E:SetCVar('nameplateOtherBottomInset', -1)
+			E:SetCVar('clampTargetNameplateToScreen', 0)
+		end
+	end
+
+	if E.Retail then
+		NP:ToggleCVar('nameplateUseClassColorForFriendlyPlayerUnitNames', db.classColorNames)
+	elseif E.TBC or E.Wrath or E.Mists then
+		E:SetCVar('nameplateMaxDistance', db.loadDistance)
+	end
+
+	-- The order of these is important !!
+	local visibility = db.visibility
+	NP:ToggleCVar('nameplateShowAll', visibility.showAll)
+	NP:ToggleCVar(E.Retail and 'nameplateShowOnlyNameForFriendlyPlayerUnits' or 'nameplateShowOnlyNames', visibility.showOnlyNames)
+
+	local enemyVisibility = visibility.enemy
+	NP:ToggleCVar('nameplateShowEnemyMinions', enemyVisibility.minions)
+	NP:ToggleCVar('nameplateShowEnemyGuardians', enemyVisibility.guardians)
+	NP:ToggleCVar('nameplateShowEnemyMinus', enemyVisibility.minus)
+	NP:ToggleCVar('nameplateShowEnemyPets', enemyVisibility.pets)
+	NP:ToggleCVar('nameplateShowEnemyTotems', enemyVisibility.totems)
+
+	local friendlyVisibility = visibility.friendly
+	NP:ToggleCVar('nameplateShowFriendlyNPCs', friendlyVisibility.npcs)
+	NP:ToggleCVar(E.Retail and 'nameplateShowFriendlyPlayerMinions' or 'nameplateShowFriendlyMinions', friendlyVisibility.minions)
+	NP:ToggleCVar(E.Retail and 'nameplateShowFriendlyPlayerGuardians' or 'nameplateShowFriendlyGuardians', friendlyVisibility.guardians)
+	NP:ToggleCVar(E.Retail and 'nameplateShowFriendlyPlayerPets' or 'nameplateShowFriendlyPets', friendlyVisibility.pets)
+	NP:ToggleCVar(E.Retail and 'nameplateShowFriendlyPlayerTotems' or 'nameplateShowFriendlyTotems', friendlyVisibility.totems)
+
+	local playerDB = db.units.PLAYER
+	local playerVisibility = playerDB.visibility
+	E:SetCVar('NameplatePersonalHideDelayAlpha', playerVisibility.alphaDelay)
+	E:SetCVar('NameplatePersonalHideDelaySeconds', playerVisibility.hideDelay)
+
+	NP:ToggleCVar('NameplatePersonalShowAlways', playerVisibility.showAlways)
+	NP:ToggleCVar('NameplatePersonalShowInCombat', playerVisibility.showInCombat)
+	NP:ToggleCVar('NameplatePersonalShowWithTarget', playerVisibility.showWithTarget)
+
+	NP:ToggleCVar('nameplateShowSelf', not (playerDB.useStaticPosition or not playerDB.enable))
+
+	-- Blizzard bug resets them after reload
+	E:SetCVar('nameplateOverlapH', db.overlapH)
+	E:SetCVar('nameplateOverlapV', db.overlapV)
+
+	-- 10.1 things
+	E:SetCVar('nameplatePlayerMaxDistance', 60)
+end
+
+function NP:PLAYER_REGEN_DISABLED()
+	NP:CombatCVar('nameplateShowFriends', NP.db.showFriendlyCombat, true)
+	NP:CombatCVar('nameplateShowEnemies', NP.db.showEnemyCombat, true)
+end
+
+function NP:PLAYER_REGEN_ENABLED()
+	NP:CombatCVar('nameplateShowFriends', NP.db.showFriendlyCombat)
+	NP:CombatCVar('nameplateShowEnemies', NP.db.showEnemyCombat)
+end
+
+function NP:Style(unit)
+	local plate = self:GetParent()
+	local frameName = self:GetName()
+	self.frameName = frameName
+	self.blizzPlate = plate.UnitFrame
+	self.isNamePlate = true -- used in auraskip
+
+	if frameName == 'ElvNP_Player' then
+		NP.PlayerFrame = self
+	elseif frameName == 'ElvNP_TestFrame' then
+		NP.TestFrame = self
+	end
+
+	if frameName == 'ElvNP_TargetClassPower' then
+		NP:StyleTargetPlate(self, unit)
+	else
+		NP:StylePlate(self, unit)
+	end
+
+	return self
+end
+
+function NP:Construct_StackingBounds(nameplate)
+	local element = CreateFrame('Frame', '$parent_StackingBounds', nameplate)
+	element:SetAllPoints()
+
+	-- little magic (part one): SetStackingBoundsFrame needs it
+	local stacking = element:CreateTexture()
+	stacking:SetColorTexture(1, 0, 0, 0)
+	stacking:SetAllPoints(element)
+
+	-- little magic (part two): fixes fps drops with stacking
+	local plate = nameplate:GetParent()
+	if plate and plate.SetStackingBoundsFrame then
+		plate:SetStackingBoundsFrame(element)
+	end
+
+	return element
+end
+
+function NP:Construct_RaisedElement(nameplate)
+	local element = CreateFrame('Frame', '$parent_RaisedElement', nameplate)
+	element:EnableMouse(false)
+	element:SetFrameLevel(10)
+	element:SetAllPoints()
+
+	element.frameName = element:GetName()
+
+	return element
+end
+
+function NP:Construct_ClassPowerTwo(nameplate)
+	if nameplate ~= NP.TestFrame then
+		if E.myclass == 'DEATHKNIGHT' then
+			nameplate.Runes = NP:Construct_Runes(nameplate)
+		elseif E.myclass == 'MONK' and E.Retail then
+			nameplate.Stagger = NP:Construct_Stagger(nameplate)
+		end
+	end
+end
+
+function NP:Update_ClassPowerTwo(nameplate)
+	if nameplate ~= NP.TestFrame then
+		if E.myclass == 'DEATHKNIGHT' then
+			NP:Update_Runes(nameplate)
+		elseif E.myclass == 'MONK' and E.Retail then
+			NP:Update_Stagger(nameplate)
+		end
+	end
+end
+
+function NP:StyleTargetPlate(nameplate)
+	nameplate:SetScale(E.Retail and 1 or E.uiscale)
+	nameplate:ClearAllPoints()
+	nameplate:Point('CENTER')
+	nameplate:Size(NP.db.clickSize.personalWidth, NP.db.clickSize.personalHeight)
+
+	nameplate.StackingBounds = NP:Construct_StackingBounds(nameplate)
+	nameplate.RaisedElement = NP:Construct_RaisedElement(nameplate)
+	nameplate.ClassPower = NP:Construct_ClassPower(nameplate)
+
+	NP:Construct_ClassPowerTwo(nameplate)
+end
+
+function NP:UpdateTargetPlate(nameplate)
+	NP:Update_ClassPower(nameplate)
+	NP:Update_ClassPowerTwo(nameplate)
+
+	nameplate:UpdateAllElements('OnShow')
+end
+
+function NP:ScalePlate(nameplate, scale, targetPlate)
+	local mult = (E.Retail or (nameplate == NP.PlayerFrame or nameplate == NP.TestFrame)) and 1 or E.uiscale
+	if targetPlate and NP.targetPlate then
+		NP.targetPlate:SetScale(mult)
+		NP.targetPlate = nil
+	end
+
+	if not nameplate then return end
+	nameplate:SetScale(scale * mult)
+
+	if targetPlate then
+		NP.targetPlate = nameplate
+	end
+end
+
+function NP:PostUpdateAllElements(event)
+	if self == NP.TestFrame or self.widgetsOnly then return end -- skip test and widget plates
+
+	if event == 'NAME_PLATE_UNIT_ADDED' and self.isTarget then
+		NP:SetupTarget(self)
+	end
+end
+
+function NP:StylePlate(nameplate)
+	nameplate:SetScale(E.Retail and 1 or E.uiscale)
+	nameplate:ClearAllPoints()
+	nameplate:Point('CENTER')
+
+	nameplate.blizzAuras = { BuffList = {}, DebuffList = {}, CrowdControlList = {} }
+
+	nameplate.StackingBounds = NP:Construct_StackingBounds(nameplate)
+	nameplate.RaisedElement = NP:Construct_RaisedElement(nameplate)
+	nameplate.Health = NP:Construct_Health(nameplate)
+	nameplate.Health.Text = NP:Construct_TagText(nameplate)
+	nameplate.Health.Text.frequentUpdates = .1
+	nameplate.HealthPrediction = NP:Construct_HealthPrediction(nameplate)
+	nameplate.Power = NP:Construct_Power(nameplate)
+	nameplate.Power.Text = NP:Construct_TagText(nameplate)
+	nameplate.Name = NP:Construct_TagText(nameplate)
+	nameplate.Level = NP:Construct_TagText(nameplate)
+	nameplate.Title = NP:Construct_TagText(nameplate)
+	nameplate.ClassificationIndicator = NP:Construct_ClassificationIndicator(nameplate)
+	nameplate.Castbar = NP:Construct_Castbar(nameplate)
+	nameplate.Portrait = NP:Construct_Portrait(nameplate)
+	nameplate.QuestIcons = NP:Construct_QuestIcons(nameplate)
+	nameplate.RaidTargetIndicator = NP:Construct_RaidTargetIndicator(nameplate)
+	nameplate.TargetIndicator = NP:Construct_TargetIndicator(nameplate)
+	nameplate.ThreatIndicator = NP:Construct_ThreatIndicator(nameplate)
+	nameplate.Highlight = NP:Construct_Highlight(nameplate)
+	nameplate.ClassPower = NP:Construct_ClassPower(nameplate)
+	nameplate.PvPIndicator = NP:Construct_PvPIndicator(nameplate) -- Horde / Alliance / HonorInfo
+	nameplate.PvPClassificationIndicator = NP:Construct_PvPClassificationIndicator(nameplate) -- Cart / Flag / Orb / Assassin Bounty
+	nameplate.PVPRole = NP:Construct_PVPRole(nameplate)
+	nameplate.Cutaway = NP:Construct_Cutaway(nameplate)
+	nameplate.PrivateAuras = NP:Construct_PrivateAuras(nameplate)
+
+	NP:Construct_Auras(nameplate)
+	NP:Construct_ClassPowerTwo(nameplate)
+
+	NP.Plates[nameplate] = nameplate.frameName
+
+	hooksecurefunc(nameplate, 'UpdateAllElements', NP.PostUpdateAllElements)
+end
+
+do
+	local elements = {
+		-- on the raised element
+		QuestIcons = true,
+		Portrait = true,
+		PVPRole = true,
+		-- on the nameplate itself
+		Highlight = false
+	}
+
+	function NP:ReparentNotNameonly(nameplate, parent)
+		for name, raised in next, elements do
+			local element = nameplate[name]
+			if element then
+				element:SetParent(parent or (raised and nameplate.RaisedElement) or nameplate)
+			end
+		end
+	end
+end
+
+do
+	local elements = {
+		-- on the raised element
+		ClassificationIndicator = true,
+		PvPIndicator = true,
+		PvPClassificationIndicator = true,
+		ThreatIndicator = true,
+		-- on the nameplate itself
+		Health = false,
+		HealthPrediction = false,
+		Power = false,
+		Castbar = false,
+		TargetIndicator = false,
+		ClassPower = false,
+		Auras_ = false,
+		Buffs_ = false,
+		Debuffs_ = false
+	}
+
+	if E.myclass == 'DEATHKNIGHT' then
+		elements.Runes = false
+	elseif E.myclass == 'MONK' then
+		elements.Stagger = false
+	end
+
+	function NP:ReparentElements(nameplate, parent)
+		for name, raised in next, elements do
+			local element = nameplate[name]
+			if element then
+				element:SetParent(parent or (raised and nameplate.RaisedElement) or nameplate)
+			end
+		end
+	end
+end
+
+function NP:UpdatePlate(nameplate, updateBase)
+	NP:Update_RaidTargetIndicator(nameplate)
+	NP:Update_PVPRole(nameplate)
+	NP:Update_Portrait(nameplate)
+	NP:Update_QuestIcons(nameplate)
+
+	local db = NP:PlateDB(nameplate)
+	if db.nameOnly or not db.enable then
+		NP:DisablePlate(nameplate, db.enable and db.nameOnly, not db.enable)
+
+		if nameplate == NP.TestFrame then
+			nameplate.Castbar:SetAlpha(0)
+			nameplate.ClassPower:SetAlpha(0)
+		end
+	elseif updateBase and db.enable then
+		NP:ReparentElements(nameplate)
+		NP:ReparentNotNameonly(nameplate)
+
+		NP:Update_Tags(nameplate)
+		NP:Update_Health(nameplate)
+		NP:Update_HealthPrediction(nameplate)
+		NP:Update_Highlight(nameplate)
+		NP:Update_Power(nameplate)
+		NP:Update_Castbar(nameplate)
+		NP:Update_ClassPower(nameplate)
+		NP:Update_Auras(nameplate)
+		NP:Update_ClassificationIndicator(nameplate)
+		NP:Update_PvPIndicator(nameplate) -- Horde / Alliance / HonorInfo
+		NP:Update_PvPClassificationIndicator(nameplate) -- Cart / Flag / Orb / Assassin Bounty
+		NP:Update_TargetIndicator(nameplate)
+		NP:Update_ThreatIndicator(nameplate)
+		NP:Update_Cutaway(nameplate)
+		NP:Update_PrivateAuras(nameplate)
+		NP:Update_ClassPowerTwo(nameplate)
+
+		if nameplate == NP.PlayerFrame then
+			NP:Update_Fader(nameplate)
+		end
+	end
+end
+
+function NP:DisablePlate(nameplate, nameOnly, hideRaised)
+	if hideRaised and nameplate.RaisedElement:IsShown() then
+		nameplate.RaisedElement:Hide() -- reshown by NAME_PLATE_UNIT_ADDED
+	end
+
+	NP:ReparentElements(nameplate, E.HiddenFrame)
+	NP:Update_PrivateAuras(nameplate, true)
+
+	if nameOnly then
+		NP:Update_Tags(nameplate)
+		NP:Update_Highlight(nameplate)
+
+		-- The position values here are forced on purpose.
+		nameplate.Name:ClearAllPoints()
+		nameplate.Name:Point('CENTER', nameplate, 'CENTER', 0, 0)
+
+		nameplate.RaidTargetIndicator:ClearAllPoints()
+		nameplate.RaidTargetIndicator:Point('BOTTOM', nameplate, 'TOP', 0, 0)
+
+		nameplate.Portrait:ClearAllPoints()
+		nameplate.Portrait:Point('RIGHT', nameplate.Name, 'LEFT', -6, 0)
+
+		nameplate.PVPRole:ClearAllPoints()
+		nameplate.PVPRole:Point('RIGHT', (nameplate.Portrait:IsShown() and nameplate.Portrait) or nameplate.Name, 'LEFT', -6, 0)
+
+		nameplate.QuestIcons:ClearAllPoints()
+		nameplate.QuestIcons:Point('LEFT', nameplate.Name, 'RIGHT', 6, 0)
+
+		nameplate.Title:ClearAllPoints()
+		nameplate.Title:Point('TOP', nameplate.Name, 'BOTTOM', 0, -2)
+
+		if nameplate.isTarget then
+			NP:SetupTarget(nameplate, true)
+		end
+	else
+		NP:ReparentNotNameonly(nameplate, E.HiddenFrame)
+	end
+end
+
+function NP:GetClassAnchor()
+	local TCP = NP.TargetClassPower
+	return TCP.realPlate or TCP
+end
+
+function NP:SetupTarget(nameplate, removed)
+	if not (NP.db.units and NP.db.units.TARGET) then return end
+
+	local TCP = NP.TargetClassPower
+	local cp = NP.db.units.TARGET.classpower
+
+	if removed or not nameplate or not cp.enable then
+		TCP.realPlate = nil
+	else
+		local db = NP:PlateDB(nameplate)
+		TCP.realPlate = not db.nameOnly and nameplate or nil
+	end
+
+	local anchor = NP:GetClassAnchor()
+	if TCP.ClassPower then
+		TCP.ClassPower:SetParent(anchor)
+		TCP.ClassPower:ClearAllPoints()
+		TCP.ClassPower:Point('CENTER', anchor, 'CENTER', cp.xOffset, cp.yOffset)
+	end
+
+	if TCP.Runes then
+		TCP.Runes:SetParent(anchor)
+		TCP.Runes:ClearAllPoints()
+		TCP.Runes:Point('CENTER', anchor, 'CENTER', cp.xOffset, cp.yOffset)
+	elseif TCP.Stagger then
+		TCP.Stagger:SetParent(anchor)
+		TCP.Stagger:ClearAllPoints()
+		TCP.Stagger:Point('CENTER', anchor, 'CENTER', cp.xOffset, cp.yOffset)
+	end
+end
+
+function NP:SetNamePlateClickThrough()
+	if E.Retail then
+		NP.PlateDriver:SetEnemyInteractible(not NP.db.clickThrough.enemy)
+		NP.PlateDriver:SetFriendlyInteractible(not NP.db.clickThrough.friendly)
+	end
+end
+
+function NP:Update_StatusBars()
+	local texture = LSM:Fetch('statusbar', NP.db.statusbar) or E.media.normTex
+	for bar in pairs(NP.StatusBars) do
+		if bar.SetStatusBarTexture then
+			bar:SetStatusBarTexture(texture)
+		else
+			bar:SetTexture(texture)
+		end
+	end
+end
+
+function NP:EnviromentConditionals()
+	local db = NP.db
+	local env = db and db.enviromentConditions
+
+	local inInstance, instanceType = IsInInstance()
+	local value = (inInstance and instanceType) or (IsResting() and 'resting') or 'world'
+	NP.InInstance, NP.InstanceType = inInstance, instanceType
+
+	-- Handle friendly nameplates if friendly combat toggle is not set
+	if env.friendlyEnabled and db.showFriendlyCombat == 'DISABLED' then
+		NP:ToggleCVar('nameplateShowFriends', env.friendly[value])
+	end
+
+	-- Handle enemy nameplates if enemy combat toggle is not set
+	if env.enemyEnabled and db.showEnemyCombat == 'DISABLED' then
+		NP:ToggleCVar('nameplateShowEnemies', env.enemy[value])
+	end
+
+	-- Handle stacking nameplates
+	if env.stackingEnabled then
+		NP:ToggleCVar('nameplateMotion', env.stackingNameplates[value])
+	else
+		NP:ToggleCVar('nameplateMotion', db.motionType == 'STACKED')
+	end
+end
+
+function NP:PLAYER_ENTERING_WORLD(event, initLogin, isReload)
+	if initLogin or isReload then
+		NP:ConfigureAll(true)
+	end
+
+	wipe(NP.SoundHandlers)
+
+	NP:EnviromentConditionals(event)
+end
+
+function NP:ToggleStaticPlate()
+	local playerEnabled = NP.db.units.PLAYER.enable
+	local isStatic = NP.db.units.PLAYER.useStaticPosition
+
+	if playerEnabled and isStatic then
+		E:EnableMover(NP.PlayerFrame.mover.name)
+		NP.PlayerFrame:Enable()
+		NP.StaticSecure:Show()
+	else
+		NP:DisablePlate(NP.PlayerFrame)
+		E:DisableMover(NP.PlayerFrame.mover.name)
+		NP.PlayerFrame:Disable()
+		NP.StaticSecure:Hide()
+	end
+
+	E:SetCVar('nameplateShowSelf', (isStatic or not playerEnabled) and 0 or 1)
+end
+
+function NP:ConfigurePlates(init)
+	NP.SkipFading = true
+
+	if NP.TestFrame:IsEnabled() then
+		NP.NAME_PLATE_UNIT_ADDED(NP.TestFrame, 'NAME_PLATE_UNIT_ADDED', NP.TestFrame.unit)
+	end
+
+	local staticEvent = (NP.db.units.PLAYER.enable and NP.db.units.PLAYER.useStaticPosition) and 'NAME_PLATE_UNIT_ADDED' or 'NAME_PLATE_UNIT_REMOVED'
+	local staticFunc = NP[staticEvent]
+	if init then -- since this is a fake plate, we actually need to trigger this always
+		staticFunc(NP.PlayerFrame, staticEvent, 'player')
+
+		NP.PlayerFrame:UpdateAllElements('ForceUpdate')
+	else -- however, these only need to happen when changing options
+		for nameplate in pairs(NP.Plates) do
+			NP:UpdatePlateSize(nameplate)
+
+			if nameplate == NP.PlayerFrame then
+				staticFunc(NP.PlayerFrame, staticEvent, 'player')
+			else
+				nameplate.previousType = nil -- keep over the callback, we still need a full update
+				NP.NAME_PLATE_UNIT_ADDED(nameplate, 'NAME_PLATE_UNIT_ADDED', nameplate.unit)
+			end
+
+			nameplate:UpdateAllElements('ForceUpdate')
+		end
+	end
+
+	NP.SkipFading = nil
+end
+
+function NP:ConfigureAll(init)
+	if not E.private.nameplates.enable then return end
+
+	NP.multiplier = NP.db.multiplier
+
+	NP:PLAYER_REGEN_ENABLED()
+	NP:UpdateTargetPlate(NP.TargetClassPower)
+	NP:Update_StatusBars()
+
+	NP:SetNamePlateClickThrough()
+	NP:SetNamePlateSizes()
+
+	NP:ConfigurePlates(init) -- keep before toggle static
+	NP:ToggleStaticPlate()
+end
+
+function NP:PlateFade(nameplate, timeToFade, startAlpha, endAlpha)
+	-- we need our own function because we want a smooth transition and dont want it to force update every pass.
+	-- its controlled by fadeTimer which is reset when UIFrameFadeOut or UIFrameFadeIn code runs.
+
+	if not nameplate.FadeObject then
+		nameplate.FadeObject = {}
+	end
+
+	nameplate.FadeObject.timeToFade = (nameplate.isTarget and 0) or timeToFade
+	nameplate.FadeObject.startAlpha = startAlpha
+	nameplate.FadeObject.endAlpha = endAlpha
+	nameplate.FadeObject.diffAlpha = endAlpha - startAlpha
+
+	if nameplate.FadeObject.fadeTimer then
+		nameplate.FadeObject.fadeTimer = 0
+	else
+		E:UIFrameFade(nameplate, nameplate.FadeObject)
+	end
+end
+
+function NP:GetNPCID(guid)
+	if E:IsSecretValue(guid) or not guid then return end
+
+	local _, _, _, _, _, npcid = strsplit('-', guid)
+	return tonumber(npcid), guid
+end
+
+function NP:UnitNPCID(unit) -- also used by Bags.lua
+	local ok, guid = pcall(UnitGUID, unit)
+	if ok then
+		return NP:GetNPCID(guid)
+	end
+end
+
+function NP:UpdateNumPlates()
+	-- wish there was another way to get just the amount
+	NP.numPlates = #C_NamePlate_GetNamePlates()
+end
+
+function NP:UpdatePlateGUID(nameplate, guid)
+	NP.PlateGUID[nameplate.unitGUID] = (guid and nameplate) or nil
+end
+
+function NP:UpdatePlateType(nameplate)
+	if nameplate == NP.TestFrame then return end
+
+	if nameplate.isMe then
+		nameplate.frameType = 'PLAYER'
+
+		if NP.db.units.PLAYER.enable then
+			NP.PlayerNamePlateAnchor:ClearAllPoints()
+			NP.PlayerNamePlateAnchor:SetParent(NP.db.units.PLAYER.useStaticPosition and NP.PlayerFrame or nameplate)
+			NP.PlayerNamePlateAnchor:SetAllPoints(NP.db.units.PLAYER.useStaticPosition and NP.PlayerFrame or nameplate)
+			NP.PlayerNamePlateAnchor:Show()
+		end
+	elseif nameplate.isPVPSanctuary then
+		nameplate.frameType = 'FRIENDLY_PLAYER'
+	elseif not nameplate.isEnemy and (not nameplate.reaction or nameplate.reaction > 4) then -- keep as: not isEnemy, dont switch to isFriend
+		nameplate.frameType = (nameplate.isPlayer and 'FRIENDLY_PLAYER') or 'FRIENDLY_NPC'
+	else
+		nameplate.frameType = (nameplate.isPlayer and 'ENEMY_PLAYER') or 'ENEMY_NPC'
+	end
+end
+
+function NP:UpdatePlateSize(nameplate)
+	if nameplate.frameType == 'PLAYER' then
+		nameplate.width, nameplate.height = NP.db.clickSize.personalWidth, NP.db.clickSize.personalHeight
+	elseif nameplate.frameType == 'FRIENDLY_PLAYER' or nameplate.frameType == 'FRIENDLY_NPC' then
+		nameplate.width, nameplate.height = NP.db.clickSize.friendlyWidth, NP.db.clickSize.friendlyHeight
+	else
+		nameplate.width, nameplate.height = NP.db.clickSize.enemyWidth, NP.db.clickSize.enemyHeight
+	end
+
+	nameplate:Size(nameplate.width, nameplate.height)
+end
+
+function NP:UpdatePlateBase(nameplate)
+	if nameplate == NP.TestFrame then
+		NP:UpdatePlate(nameplate, true)
+	elseif nameplate == NP.PlayerFrame then
+		NP:UpdatePlate(nameplate, true)
+	else
+		NP:UpdatePlate(nameplate, nameplate.frameType ~= nameplate.previousType)
+
+		nameplate.previousType = nameplate.frameType
+	end
+end
+
+function NP:PLAYER_TARGET_CHANGED(_, unit)
+	NP:SetupTarget(self) -- pass it, even as nil here
+end
+
+function NP:NAME_PLATE_UNIT_ADDED(_, unit)
+	if not unit then unit = self.unit end
+
+	self.widgetsOnly = E.Retail and self.blizzPlate and UnitNameplateShowsWidgetsOnly(unit)
+	self.widgetSet = E.Retail and UnitWidgetSet(unit)
+	self.classification = UnitClassification(unit)
+	self.creatureType = UnitCreatureType(unit)
+	self.isMe = E:UnitIsUnit(unit, 'player')
+	self.isPet = E:UnitIsUnit(unit, 'pet')
+	self.isFriend = UnitIsFriend('player', unit)
+	self.isEnemy = UnitIsEnemy('player', unit)
+	self.isPlayer = UnitIsPlayer(unit)
+	self.isGameObject = UnitIsGameObject(unit)
+	self.isPVPSanctuary = UnitIsPVPSanctuary(unit)
+	self.isBattlePet = not E.Classic and UnitIsBattlePet(unit)
+	self.reaction = UnitReaction('player', unit) -- Player Reaction
+	self.repReaction = UnitReaction(unit, 'player') -- Reaction to Player
+	self.faction = UnitFactionGroup(unit)
+	self.battleFaction = E:GetUnitBattlefieldFaction(unit)
+	self.unitName, self.unitRealm = UnitName(unit)
+	self.npcID, self.unitGUID = NP:UnitNPCID(unit)
+	self.className, self.classFile, self.classID = UnitClass(unit)
+	self.classColor = (self.isPlayer and E:ClassColor(self.classFile)) or (self.repReaction and NP.Colors.reactions[self.repReaction]) or nil
+
+	local specID, specIcon
+	local spec = E.Retail and E:GetUnitSpecInfo(unit)
+	if spec then
+		specID, specIcon = spec.id, spec.icon
+	end
+
+	self.specID = specID
+	self.specIcon = specIcon
+
+	if self.unitGUID then
+		NP:UpdatePlateGUID(self, self.unitGUID)
+	end
+
+	NP:UpdateNumPlates()
+	NP:UpdatePlateType(self)
+	NP:UpdatePlateSize(self)
+
+	self.softTargetFrame = self.blizzPlate and self.blizzPlate.SoftTargetFrame
+	if self.softTargetFrame then
+		self.softTargetFrame:SetParent(self)
+		self.softTargetFrame:SetIgnoreParentAlpha(true)
+	end
+
+	self.widgetContainer = self.blizzPlate and self.blizzPlate.WidgetContainer
+	if self.widgetContainer then
+		self.widgetContainer:SetParent(self)
+		self.widgetContainer:SetIgnoreParentAlpha(true)
+		self.widgetContainer:ClearAllPoints()
+
+		local db = NP.db.widgets
+		local point = db.below and 'BOTTOM' or 'TOP'
+		self.widgetContainer:SetPoint(E.InversePoints[point], self, point, db.xOffset, db.yOffset)
+	end
+
+	if self.widgetsOnly or self.isGameObject then
+		NP:DisablePlate(self, nil, true)
+
+		self.previousType = nil -- dont get the plate stuck for next unit
+	else
+		if not self.RaisedElement:IsShown() then
+			self.RaisedElement:Show()
+		end
+
+		NP:UpdatePlateBase(self)
+	end
+
+	if (NP.db.fadeIn and not NP.SkipFading) and self.frameType ~= 'PLAYER' then
+		NP:PlateFade(self, 1, 0, 1)
+	end
+end
+
+function NP:NAME_PLATE_UNIT_REMOVED(event, unit)
+	if self ~= NP.TestFrame then
+		if self.frameType == 'PLAYER' then
+			NP.PlayerNamePlateAnchor:Hide()
+		end
+
+		if self.isTarget then
+			NP:ScalePlate(self, 1, true)
+			NP:SetupTarget(self, true)
+		end
+	end
+
+	if self.unitGUID then
+		NP:UpdatePlateGUID(self)
+	end
+
+	NP:UpdateNumPlates()
+
+	if self.softTargetFrame then
+		self.softTargetFrame:SetParent(self.blizzPlate)
+		self.softTargetFrame:SetIgnoreParentAlpha(false)
+	end
+
+	if self.widgetContainer then -- Place Widget Back on Blizzard Plate
+		self.widgetContainer:SetParent(self.blizzPlate)
+		self.widgetContainer:SetIgnoreParentAlpha(false)
+		self.widgetContainer:ClearAllPoints()
+		self.widgetContainer:SetPoint('TOP', self.blizzPlate.castBar, 'BOTTOM')
+	end
+
+	-- these can appear on SoftTarget selfs and they aren't
+	-- from NAME_PLATE_UNIT_ADDED which means, they will still be shown
+	-- in some cases when the plate previously had the element
+	if self.QuestIcons then
+		self.QuestIcons:Hide()
+	end
+
+	-- vars that we need to keep in a nonstale state
+	self.Health.cur = nil -- cutaway
+	self.Power.cur = nil -- cutaway
+	self.npcID = nil -- just cause
+end
+
+function NP:UNIT_FACTION(_, unit)
+	if not unit or self.unit ~= unit then return end
+
+	self.isMe = E:UnitIsUnit(unit, 'player')
+	self.reaction = UnitReaction('player', unit) -- Player Reaction
+	self.repReaction = UnitReaction(unit, 'player') -- Reaction to Player
+	self.isFriend = UnitIsFriend('player', unit)
+	self.isEnemy = UnitIsEnemy('player', unit)
+	self.faction = UnitFactionGroup(unit)
+	self.isPVPSanctuary = UnitIsPVPSanctuary(unit)
+	self.battleFaction = E:GetUnitBattlefieldFaction(unit)
+	self.classColor = (self.isPlayer and E:ClassColor(self.classFile)) or (self.repReaction and NP.Colors.reactions[self.repReaction]) or nil
+
+	NP:UpdatePlateType(self)
+	NP:UpdatePlateSize(self)
+	NP:UpdatePlateBase(self)
+end
+
+function NP:GetThreatSituationColor(indicator, status)
+	local colors, color = NP.db.colors.threat
+	if status == 3 then -- securely tanking
+		color = (indicator.useSolo and colors.soloColor) or (indicator.isTank and colors.goodColor) or colors.badColor
+	elseif status == 2 then -- insecurely tanking
+		color = (indicator.offTank and colors.offTankColorBadTransition) or (indicator.isTank and colors.badTransition) or colors.goodTransition
+	elseif status == 1 then -- not tanking but threat higher than tank
+		color = (indicator.offTank and colors.offTankColorGoodTransition) or (indicator.isTank and colors.goodTransition) or colors.badTransition
+	else -- not tanking at all
+		color = (indicator.offTank and colors.offTankColor) or (indicator.isTank and colors.badColor) or colors.goodColor
+	end
+
+	return color, color == colors.goodColor
+end
+
+function NP:GetThreatSituationScale(indicator, db, status)
+	if status == 3 then -- securely tanking
+		return (indicator.useSolo and db.goodScale) or (indicator.isTank and db.goodScale) or db.badScale
+	elseif status == 2 then -- insecurely tanking
+		return 1
+	elseif status == 1 then -- not tanking but threat higher than tank
+		return 1
+	else -- not tanking at all
+		return (indicator.offTank and db.goodScale) or (indicator.isTank and db.badScale) or db.goodScale
+	end
+end
+
+function NP:AuraFilter(...)
+	if NP.db.useBlizzardAuras then
+		return true -- already filtered by blizzard
+	else
+		return UF.AuraFilter(self, ...)
+	end
+end
+
+function NP:BlizzardPlate_RefreshList(listFrame, auraList)
+	if not NP.db.useBlizzardAuras then return end
+
+	local blizzPlate = self:GetParent()
+	local plate = blizzPlate:GetParent()
+
+	local nameplate = plate and plate.unitFrame
+	local blizzAuras = nameplate and nameplate.blizzAuras
+	if not blizzAuras then return end
+
+	local list
+	if listFrame == self.BuffListFrame and auraList == self.buffList then
+		list = blizzAuras.BuffList
+	elseif listFrame == self.DebuffListFrame and auraList == self.debuffList then
+		list = blizzAuras.DebuffList
+	elseif listFrame == self.CrowdControlListFrame and auraList == self.crowdControlList then
+		list = blizzAuras.CrowdControlList
+	end
+
+	if list then
+		nameplate.allowAuraUpdate = true
+
+		NP:BlizzardAuras_UpdateAuras(list, listFrame, auraList)
+	end
+end
+
+function NP:BlizzardPlate_RefreshAuras(updateInfo)
+	if not NP.db.useBlizzardAuras then return end
+
+	NP:NamePlateCallBack('FAKE_REFRESH_AURAS', self.unitToken, updateInfo)
+end
+
+function NP:NamePlateCallBack(event, unit, updateInfo)
+	local success, plate = pcall(C_NamePlate_GetNamePlateForUnit, unit)
+	if not success or not plate then return end -- prevent error on restricted units
+
+	local nameplate = plate.unitFrame
+	if not nameplate or not nameplate.UpdateAllElements then return end -- prevent error with plater
+	if nameplate.widgetsOnly then return end -- not required to update this one
+
+	if event == 'FAKE_REFRESH_AURAS' then
+		if not nameplate.allowAuraUpdate then return end
+
+		nameplate.allowAuraUpdate = nil
+
+		local element = nameplate.Buffs or nameplate.Debuffs or nameplate.Auras
+		if element then -- any of them will work, oUF will handle all three
+			element.UpdateAuras(nameplate, event, unit, updateInfo)
+		end
+	elseif event == 'UNIT_FACTION' then
+		NP.UNIT_FACTION(nameplate, event, unit)
+	end
+end
+
+local optionsTable = {
+	'EnemyMinus',
+	'EnemyMinions',
+	'FriendlyMinions',
+	'PersonalResource',
+	'PersonalResourceOnEnemy',
+	'MotionDropDown',
+	'ShowAll'
+}
+
+if E.TBC or E.Wrath or E.Mists then
+	tinsert(optionsTable, 'NameplateMaxDistanceSlider')
+end
+
+function NP:HideInterfaceOptions()
+	for _, x in pairs(optionsTable) do
+		local o = _G['InterfaceOptionsNamesPanelUnitNameplates'..x]
+		if o then
+			o:SetSize(0.00001, 0.00001)
+			o:SetAlpha(0)
+			o:Hide()
+		end
+	end
+end
+
+function NP:SetNamePlateSizes()
+	if E.Retail then
+		NP.PlateDriver:SetSize(NP.db.clickSize.width, NP.db.clickSize.height)
+	else
+		C_NamePlate_SetNamePlateSelfSize(NP.db.clickSize.personalWidth * E.uiscale, NP.db.clickSize.personalHeight * E.uiscale)
+		C_NamePlate_SetNamePlateEnemySize(NP.db.clickSize.enemyWidth * E.uiscale, NP.db.clickSize.enemyHeight * E.uiscale)
+		C_NamePlate_SetNamePlateFriendlySize(NP.db.clickSize.friendlyWidth * E.uiscale, NP.db.clickSize.friendlyHeight * E.uiscale)
+	end
+end
+
+function NP:HideClassNameplateBar(bar)
+	if not bar then return end
+
+	bar:Hide()
+	bar:UnregisterAllEvents()
+end
+
+function NP:SetupClassNameplateBars()
+	if not self or self:IsForbidden() then return end
+
+	NP:HideClassNameplateBar(self.classNamePlatePowerBar)
+	NP:HideClassNameplateBar(self.classNamePlateMechanicFrame)
+	NP:HideClassNameplateBar(self.classNamePlateAlternatePowerBar) -- BrewmasterBar / EbonMightBar
+end
+
+function NP:UpdateColors()
+	NP.Colors.tapped = E:SetColorTable(NP.Colors.tapped, NP.db.colors.tapped)
+
+	NP.Colors.power.MANA = E:SetColorTable(NP.Colors.power.MANA, NP.db.colors.power.MANA)
+	NP.Colors.power.RAGE = E:SetColorTable(NP.Colors.power.RAGE, NP.db.colors.power.RAGE)
+	NP.Colors.power.FOCUS = E:SetColorTable(NP.Colors.power.FOCUS, NP.db.colors.power.FOCUS)
+	NP.Colors.power.ENERGY = E:SetColorTable(NP.Colors.power.ENERGY, NP.db.colors.power.ENERGY)
+	NP.Colors.power.RUNIC_POWER = E:SetColorTable(NP.Colors.power.RUNIC_POWER, NP.db.colors.power.RUNIC_POWER)
+	NP.Colors.power.PAIN = E:SetColorTable(NP.Colors.power.PAIN, NP.db.colors.power.PAIN)
+	NP.Colors.power.FURY = E:SetColorTable(NP.Colors.power.FURY, NP.db.colors.power.FURY)
+	NP.Colors.power.LUNAR_POWER = E:SetColorTable(NP.Colors.power.LUNAR_POWER, NP.db.colors.power.LUNAR_POWER)
+	NP.Colors.power.INSANITY = E:SetColorTable(NP.Colors.power.INSANITY, NP.db.colors.power.INSANITY)
+	NP.Colors.power.MAELSTROM = E:SetColorTable(NP.Colors.power.MAELSTROM, NP.db.colors.power.MAELSTROM)
+
+	NP.Colors.power.SHADOW_ORBS = E:SetColorTable(NP.Colors.power.SHADOW_ORBS, NP.db.colors.classResources.PRIEST)
+	NP.Colors.power.HOLY_POWER = E:SetColorTable(NP.Colors.power.HOLY_POWER, NP.db.colors.classResources.PALADIN)
+
+	NP.Colors.power[POWERTYPE_ALTERNATE] = E:SetColorTable(NP.Colors.power[POWERTYPE_ALTERNATE], NP.db.colors.power.ALT_POWER)
+
+	for key in next, NP.db.colors.classification do
+		NP.Colors.classification[key] = E:SetColorTable(NP.Colors.classification[key], NP.db.colors.classification[key])
+	end
+
+	for i = 1, 8 do
+		NP.Colors.reactions[i] = E:SetColorTable(NP.Colors.reactions[i], NP.db.colors.reactions[i])
+	end
+
+	for i = 0, 9 do
+		if i ~= 4 then -- selection doesnt have 4 and skips to 13
+			NP.Colors.selection[i] = E:SetColorTable(NP.Colors.selection[i], NP.db.colors.selection[i])
+		end
+	end
+	NP.Colors.selection[13] = E:SetColorTable(NP.Colors.selection[13], NP.db.colors.selection[13])
+end
+
+function NP:SetStatusBarColor(bar, r, g, b, a)
+	bar:GetStatusBarTexture():SetVertexColor(r, g, b, a)
+
+	if bar.bg then
+		bar.bg:SetVertexColor(r, g, b, NP.multiplier)
+	end
+end
+
+function NP:BlizzardAuras_UpdateAuras(list, listFrame, auraList)
+	wipe(list)
+
+	for _, child in next, { listFrame:GetChildren() } do
+		list[child.auraInstanceID] = auraList[child.auraInstanceID] or nil
+	end
+end
+
+function NP:BlizzardAuras_GetAuras(nameplate, which)
+	if not NP.db.useBlizzardAuras or not nameplate.blizzAuras then return end
+
+	return nameplate.blizzAuras[which] or nil
+end
+
+function NP:GetBlizzardCrowdControl(nameplate)
+	return NP:BlizzardAuras_GetAuras(nameplate, 'CrowdControlList')
+end
+
+function NP:GetBlizzardBuffs(nameplate)
+	return NP:BlizzardAuras_GetAuras(nameplate, 'BuffList')
+end
+
+function NP:GetBlizzardDebuffs(nameplate)
+	return NP:BlizzardAuras_GetAuras(nameplate, 'DebuffList')
+end
+
+function NP:Initialize()
+	if not E.private.nameplates.enable then return end
+	NP.Initialized = true
+
+	NP.thinBorders = NP.db.thinBorders
+	NP.SPACING = (NP.thinBorders or E.twoPixelsPlease) and 0 or 1
+	NP.BORDER = (NP.thinBorders and not E.twoPixelsPlease) and 1 or 2
+
+	NP.Plates = {}
+	NP.PlateGUID = {}
+	NP.StatusBars = {}
+	NP.SoundHandlers = {}
+	NP.Colors = {
+		classification = {},
+		selection = {},
+		reactions = {},
+		power = {}
+	}
+
+	NP.multiplier = NP.db.multiplier or 0.35
+	NP.numPlates = 0
+
+	NP:UpdateColors()
+
+	ElvUF:RegisterStyle('ElvNP', NP.Style)
+	ElvUF:SetActiveStyle('ElvNP')
+
+	if E.Retail then
+		NP.SetupClassNameplateBars(_G.NamePlateDriverFrame)
+
+		hooksecurefunc(_G.NamePlateDriverFrame, 'SetupClassNameplateBars', NP.SetupClassNameplateBars)
+	end
+
+	local playerFrame = ElvUF:Spawn('player', 'ElvNP_Player', '')
+	playerFrame:ClearAllPoints()
+	playerFrame:Point('TOP', UIParent, 'CENTER', 0, -150)
+	playerFrame:Size(NP.db.clickSize.personalWidth, NP.db.clickSize.personalHeight)
+	playerFrame.frameType = 'PLAYER'
+
+	local playerHolder = E:CreateMover(playerFrame, 'ElvNP_PlayerMover', L["Player NamePlate"], nil, nil, nil, 'ALL,SOLO', nil, 'nameplate,playerGroup')
+	NP.PlayerMover = playerHolder.mover
+
+	local staticSecure = CreateFrame('Button', 'ElvNP_StaticSecure', UIParent, 'SecureUnitButtonTemplate')
+	staticSecure:SetAttribute('unit', 'player')
+	staticSecure:SetAttribute('*type1', 'target')
+	staticSecure:SetAttribute('*type2', 'togglemenu')
+	staticSecure:SetAttribute('toggleForVehicle', true)
+	staticSecure:RegisterForClicks('LeftButtonDown', 'RightButtonDown')
+	staticSecure:SetScript('OnEnter', _G.UnitFrame_OnEnter)
+	staticSecure:SetScript('OnLeave', _G.UnitFrame_OnLeave)
+	staticSecure:ClearAllPoints()
+	staticSecure:Point('TOPLEFT', NP.PlayerMover)
+	staticSecure:Point('BOTTOMRIGHT', NP.PlayerMover)
+	staticSecure:Hide()
+	staticSecure.unit = 'player' -- Needed for OnEnter, OnLeave
+	NP.StaticSecure = staticSecure
+
+	local testFrame = ElvUF:Spawn('player', 'ElvNP_TestFrame')
+	testFrame:ClearAllPoints()
+	testFrame:Point('BOTTOM', UIParent, 'BOTTOM', 0, 250)
+	testFrame:Size(NP.db.clickSize.personalWidth, NP.db.clickSize.personalHeight)
+	testFrame:SetMovable(true)
+	testFrame:RegisterForDrag('LeftButton', 'RightButton')
+	testFrame:SetScript('OnDragStart', function() NP.TestFrame:StartMoving() end)
+	testFrame:SetScript('OnDragStop', function() NP.TestFrame:StopMovingOrSizing() end)
+	testFrame.frameType = 'PLAYER'
+	testFrame:Disable()
+
+	NP:DisablePlate(testFrame)
+
+	local targetClassPower = ElvUF:Spawn('player', 'ElvNP_TargetClassPower')
+	targetClassPower:Size(NP.db.clickSize.personalWidth, NP.db.clickSize.personalHeight)
+	targetClassPower.frameType = 'TARGET'
+	targetClassPower:SetAttribute('toggleForVehicle', true)
+	targetClassPower:ClearAllPoints()
+	targetClassPower:Point('TOP', E.UIParent, 'BOTTOM', 0, -500)
+	NP.TargetClassPower = targetClassPower
+
+	NP.PlayerNamePlateAnchor = CreateFrame('Frame', 'ElvUIPlayerNamePlateAnchor', E.UIParent)
+	NP.PlayerNamePlateAnchor:EnableMouse(false)
+	NP.PlayerNamePlateAnchor:Hide()
+
+	local driver = ElvUF:SpawnNamePlates('ElvNP_')
+	if driver then
+		driver:SetTargetCallback(NP.PLAYER_TARGET_CHANGED)
+		driver:SetAddedCallback(NP.NAME_PLATE_UNIT_ADDED)
+		driver:SetRemovedCallback(NP.NAME_PLATE_UNIT_REMOVED)
+
+		NP.PlateDriver = driver
+	end
+
+	NP:RegisterEvent('PLAYER_REGEN_ENABLED')
+	NP:RegisterEvent('PLAYER_REGEN_DISABLED')
+	NP:RegisterEvent('PLAYER_ENTERING_WORLD')
+	NP:RegisterEvent('PLAYER_UPDATE_RESTING', 'EnviromentConditionals')
+	NP:RegisterEvent('ZONE_CHANGED_NEW_AREA', 'EnviromentConditionals')
+	NP:RegisterEvent('UNIT_FACTION', 'NamePlateCallBack')
+
+	if not E.Retail then
+		NP:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+	end
+
+	NP:HideInterfaceOptions()
+	NP:SetCVars()
+end
+
+E:RegisterModule(NP:GetName())

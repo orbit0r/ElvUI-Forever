@@ -1,0 +1,168 @@
+local E, L, V, P, G = unpack(ElvUI)
+local BL = E:GetModule('Blizzard')
+local M = E:GetModule('Misc')
+
+local _G = _G
+local ipairs = ipairs
+local CreateFrame = CreateFrame
+local hooksecurefunc = hooksecurefunc
+
+local POSITION, POINT, X_OFFSET, Y_OFFSET, BASE_YOFFSET = 'TOP', 'BOTTOM', 0, -5, 0 -- should match in PostAlertMove
+
+local function AlertSubSystem_AdjustPosition(alertFrameSubSystem)
+	if alertFrameSubSystem.alertFramePool then --queued alert system
+		alertFrameSubSystem.AdjustAnchors = BL.AdjustQueuedAnchors
+	elseif not alertFrameSubSystem.anchorFrame then --simple alert system
+		alertFrameSubSystem.AdjustAnchors = BL.AdjustAnchors
+	elseif alertFrameSubSystem.anchorFrame then --anchor frame system
+		alertFrameSubSystem.AdjustAnchors = BL.AdjustAnchorsNonAlert
+	end
+end
+
+function E:PostAlertMove()
+	local perks, anchor = BL:GetAlertAnchors()
+
+	local growUp = perks
+	if not growUp then
+		local _, y = _G.AlertFrameMover:GetCenter()
+		growUp = y < (E.UIParent:GetTop() * 0.5)
+	end
+
+	if growUp then
+		POSITION, POINT, X_OFFSET, Y_OFFSET, BASE_YOFFSET = 'BOTTOM', 'TOP', 0, 5, perks and 40 or 0
+	else -- should match above in the cache
+		POSITION, POINT, X_OFFSET, Y_OFFSET, BASE_YOFFSET = 'TOP', 'BOTTOM', 0, -5, 0
+	end
+
+	_G.AlertFrameMover:SetFormattedText('%s %s', _G.AlertFrameMover.textString, growUp and '(Grow Up)' or '(Grow Down)')
+
+	_G.AlertFrame:ClearAllPoints()
+	_G.AlertFrame:SetAllPoints(perks or anchor)
+
+	if E.private.general.lootRoll then
+		M:PositionGroupLootContainer()
+	end
+end
+
+function BL:GetAlertAnchors()
+	local perks = _G.PerksProgramFrame -- support for the Trading Post
+	local perksFooter = perks and perks.FooterFrame
+	local perksAnchor = (perksFooter and _G.AlertFrame.baseAnchorFrame == perksFooter.RotateButtonContainer) and perksFooter
+
+	local anchor = (E.private.general.lootRoll and M:UpdateLootRollAnchors(POSITION)) or _G.AlertFrameHolder
+
+	return perksAnchor, anchor, POSITION, POINT, X_OFFSET, Y_OFFSET, BASE_YOFFSET
+end
+
+function BL:AdjustQueuedAnchors(relativeAlert)
+	local base = BASE_YOFFSET -- copy we can clear after the first
+	for alert in self.alertFramePool:EnumerateActive() do
+		alert:ClearAllPoints()
+		alert:Point(POSITION, relativeAlert, POINT, X_OFFSET, base + Y_OFFSET)
+
+		relativeAlert = alert
+
+		if base ~= 0 then
+			base = 0 -- we only want to adjust the first alert
+		end
+	end
+
+	return relativeAlert
+end
+
+function BL:AdjustAnchors(relativeAlert)
+	local alert = self.alertFrame
+	if alert:IsShown() then
+		alert:ClearAllPoints()
+		alert:Point(POSITION, relativeAlert, POINT, X_OFFSET, Y_OFFSET)
+
+		return alert
+	end
+
+	return relativeAlert
+end
+
+function BL:AdjustAnchorsNonAlert(relativeAnchor)
+	local anchor = self.anchorFrame
+	if anchor:IsShown() then
+		anchor:ClearAllPoints()
+		anchor:Point(POSITION, relativeAnchor, POINT, X_OFFSET, Y_OFFSET)
+
+		return anchor
+	end
+
+	return relativeAnchor
+end
+
+function BL:HandleGroupLootContainer()
+	_G.GroupLootContainer:EnableMouse(false) -- Prevent this weird non-clickable area stuff since 8.1; Monitor this, as it may cause addon compatibility.
+
+	if E.hasEditMode then
+		_G.GroupLootContainer.ignoreInLayout = true
+	elseif _G.UIPARENT_MANAGED_FRAME_POSITIONS then
+		_G.UIPARENT_MANAGED_FRAME_POSITIONS.GroupLootContainer = nil
+	end
+
+	hooksecurefunc('GroupLootContainer_Update', M.PositionGroupLootContainer)
+end
+
+function BL:AlertMovers()
+	local AlertFrameHolder = CreateFrame('Frame', 'AlertFrameHolder', E.UIParent)
+	AlertFrameHolder:Size(180, 20)
+	AlertFrameHolder:Point('TOP', E.UIParent, 'TOP', 0, -20)
+
+	E:CreateMover(AlertFrameHolder, 'AlertFrameMover', L["Loot / Alert Frames"], nil, nil, E.PostAlertMove, nil, nil, 'general,blizzardImprovements')
+
+	BL:HandleGroupLootContainer()
+
+	--Replace AdjustAnchors functions to allow alerts to grow down if needed.
+	--We will need to keep an eye on this in case it taints. It shouldn't, but you never know.
+	for _, alertFrameSubSystem in ipairs(_G.AlertFrame.alertFrameSubSystems) do
+		AlertSubSystem_AdjustPosition(alertFrameSubSystem)
+	end
+
+	--This should catch any alert systems that are created by other addons
+	hooksecurefunc(_G.AlertFrame, 'AddAlertFrameSubSystem', function(_, alertFrameSubSystem)
+		AlertSubSystem_AdjustPosition(alertFrameSubSystem)
+	end)
+
+	if E.Retail then -- alerts on the Perks Program Frame (Trading Post)
+		hooksecurefunc(_G.AlertFrame, 'SetBaseAnchorFrame', E.PostAlertMove)
+		hooksecurefunc(_G.AlertFrame, 'ResetBaseAnchorFrame', E.PostAlertMove)
+	end
+
+	self:SecureHook(_G.AlertFrame, 'UpdateAnchors', E.PostAlertMove)
+
+	--[=[ Code you can use for alert testing
+		--Queued Alerts:
+		/run AchievementAlertSystem:AddAlert(5192)
+		/run CriteriaAlertSystem:AddAlert(9023, 'Doing great!')
+		/run LootAlertSystem:AddAlert('|cffa335ee|Hitem:18832::::::::::|h[Brutality Blade]|h|r', 1, 1, 1, 1, false, false, 0, false, false)
+		/run LootUpgradeAlertSystem:AddAlert('|cffa335ee|Hitem:18832::::::::::|h[Brutality Blade]|h|r', 1, 1, 1, nil, nil, false)
+		/run MoneyWonAlertSystem:AddAlert(81500)
+		/run NewRecipeLearnedAlertSystem:AddAlert(204)
+		/run SkillLineSpecsUnlockedAlertSystem:AddAlert(2912, 182)
+		/run NewCosmeticAlertFrameSystem:AddAlert(204)
+		/run NewWarbandSceneAlertSystem:AddAlert(1)
+
+		--Simple Alerts
+		/run GuildChallengeAlertSystem:AddAlert(3, 2, 5)
+		/run InvasionAlertSystem:AddAlert(678, DUNGEON_FLOOR_THENEXUS1, true, 1, 1)
+		/run WorldQuestCompleteAlertSystem:AddAlert(AlertFrameMixin:BuildQuestData(42114))
+		/run GarrisonTalentAlertSystem:AddAlert(3, C_Garrison.GetTalentInfo(370))
+		/run GarrisonBuildingAlertSystem:AddAlert(GARRISON_CACHE)
+		/run GarrisonFollowerAlertSystem:AddAlert(204, 'Ben Stone', 90, 3, false)
+		/run GarrisonMissionAlertSystem:AddAlert(681) (Requires a mission ID that is in your mission list.)
+		/run GarrisonShipFollowerAlertSystem:AddAlert(592, 'Test', 'Transport', 'GarrBuilding_Barracks_1_H', 3, 2, 1)
+		/run LegendaryItemAlertSystem:AddAlert('|cffa335ee|Hitem:18832::::::::::|h[Brutality Blade]|h|r')
+		/run EntitlementDeliveredAlertSystem:AddAlert('', [[Interface\Icons\Ability_pvp_gladiatormedallion]], TRINKET0SLOT, 214)
+		/run RafRewardDeliveredAlertSystem:AddAlert('', [[Interface\Icons\Ability_pvp_gladiatormedallion]], TRINKET0SLOT, 214)
+		/run DigsiteCompleteAlertSystem:AddAlert('Human')
+		/run HousingItemEarnedAlertFrameSystem:AddAlert({ itemType = Enum.HousingItemToastType.Decor, icon = 7423477, itemName = 'Covered Square Suramar Table' })
+		/run InitiativeTaskCompleteAlertFrameSystem:AddAlert("Test Initiative Task")
+
+		--Bonus Rolls
+		/run BonusRollFrame_CloseBonusRoll()
+		/run BonusRollFrame_StartBonusRoll(242969,'test',10,515,1273,14) --515 is darkmoon token, change to another currency id you have
+	]=]
+end
