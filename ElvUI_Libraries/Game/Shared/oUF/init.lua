@@ -30,7 +30,10 @@ oUF.isClassic = WOW_PROJECT_ID == WOW_PROJECT_CLASSIC
 -- Forever (1.60.x / Interface 16001): Mainline UI, own project id — treat as retail for oUF paths
 do
 	local toc = tonumber(wowtoc) or 0
+	local ver = tostring((GetBuildInfo and GetBuildInfo()) or '')
 	oUF.isForever = toc == 16001 or (toc >= 16000 and toc < 20000)
+		or ver:find('^1%.60') ~= nil
+		or (C_SwingTimer ~= nil and Enum ~= nil and Enum.PlayerSwingType ~= nil)
 	if oUF.isForever then
 		oUF.isRetail = true
 	end

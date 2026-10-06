@@ -90,69 +90,88 @@ function S:Blizzard_ProfessionsBook()
 	if not (E.private.skins.blizzard.enable and E.private.skins.blizzard.spellbook) then return end
 
 	local ProfessionsBookFrame = _G.ProfessionsBookFrame
+	if not ProfessionsBookFrame then return end
+
 	S:HandleFrame(ProfessionsBookFrame)
 
-	if E.global.general.disableTutorialButtons then
-		_G.ProfessionsBookFrameTutorialButton:Kill()
-	else
-		_G.ProfessionsBookFrameTutorialButton.Ring:Hide()
+	local tutorial = _G.ProfessionsBookFrameTutorialButton
+	if tutorial then
+		if E.global.general.disableTutorialButtons then
+			tutorial:Kill()
+		elseif tutorial.Ring then
+			tutorial.Ring:Hide()
+		end
 	end
 
 	--Profession Tab
 	for _, button in next, { _G.PrimaryProfession1, _G.PrimaryProfession2, _G.SecondaryProfession1, _G.SecondaryProfession2, _G.SecondaryProfession3 } do
-		button.missingHeader:SetTextColor(1, 1, 0)
-		button.missingText:SetTextColor(1, 1, 1)
+		if button then
+			if button.missingHeader then button.missingHeader:SetTextColor(1, 1, 0) end
+			if button.missingText then button.missingText:SetTextColor(1, 1, 1) end
 
-		local a, b, c, _, e = button.statusBar:GetPoint()
-		button.statusBar:Point(a, b, c, 0, e)
-		button.statusBar.rankText:Point('CENTER')
-		S:HandleStatusBar(button.statusBar, barColor)
+			if button.statusBar then
+				local a, b, c, _, e = button.statusBar:GetPoint()
+				button.statusBar:Point(a, b, c, 0, e)
+				if button.statusBar.rankText then button.statusBar.rankText:Point('CENTER') end
+				S:HandleStatusBar(button.statusBar, barColor)
 
-		if a == 'BOTTOMLEFT' then
-			button.rank:Point('BOTTOMLEFT', button.statusBar, 'TOPLEFT', 0, 4)
-		elseif a == 'TOPLEFT' then
-			button.rank:Point('TOPLEFT', button.professionName, 'BOTTOMLEFT', 0, -20)
+				if button.rank then
+					if a == 'BOTTOMLEFT' then
+						button.rank:Point('BOTTOMLEFT', button.statusBar, 'TOPLEFT', 0, 4)
+					elseif a == 'TOPLEFT' and button.professionName then
+						button.rank:Point('TOPLEFT', button.professionName, 'BOTTOMLEFT', 0, -20)
+					end
+				end
+			end
+
+			if button.unlearn and button.statusBar then
+				button.unlearn:Point('RIGHT', button.statusBar, 'LEFT', -18, -5)
+			end
+
+			if button.icon then
+				S:HandleIcon(button.icon)
+
+				button:StripTextures()
+				if button.professionName then
+					button.professionName:Point('TOPLEFT', 100, -4)
+				end
+
+				button:CreateBackdrop(nil, nil, nil, nil, nil, nil, nil, true)
+				button.backdrop.Center:SetDrawLayer('BORDER', -1)
+				button.backdrop:SetOutside(button.icon)
+				button.backdrop:SetBackdropColor(0, 0, 0, 1)
+				button.backdrop.callbackBackdropColor = ClearBackdrop
+
+				button.icon:SetDesaturated(false)
+				button.icon:SetAlpha(1)
+			end
+
+			if button.CircleMask then
+				button.CircleMask:Hide()
+			end
+
+			HandleSkillButton(button.SpellButton1)
+			HandleSkillButton(button.SpellButton2)
 		end
-
-		if button.unlearn then
-			button.unlearn:Point('RIGHT', button.statusBar, 'LEFT', -18, -5)
-		end
-
-		if button.icon then
-			S:HandleIcon(button.icon)
-
-			button:StripTextures()
-			button.professionName:Point('TOPLEFT', 100, -4)
-
-			button:CreateBackdrop(nil, nil, nil, nil, nil, nil, nil, true)
-			button.backdrop.Center:SetDrawLayer('BORDER', -1)
-			button.backdrop:SetOutside(button.icon)
-			button.backdrop:SetBackdropColor(0, 0, 0, 1)
-			button.backdrop.callbackBackdropColor = ClearBackdrop
-
-			button.icon:SetDesaturated(false)
-			button.icon:SetAlpha(1)
-		end
-
-		if button.CircleMask then
-			button.CircleMask:Hide()
-		end
-
-		HandleSkillButton(button.SpellButton1)
-		HandleSkillButton(button.SpellButton2)
 	end
 
 	for i = 1, 2 do
 		local button = _G['PrimaryProfession'..i]
-		S:HandleButton(button, true, nil, true)
+		if button then
+			S:HandleButton(button, true, nil, true)
 
-		if button.iconTexture then
-			S:HandleIcon(button.iconTexture, true)
+			if button.iconTexture then
+				S:HandleIcon(button.iconTexture, true)
+			end
 		end
 	end
 
-	hooksecurefunc('FormatProfession', FormatProfessionHook)
-	hooksecurefunc('ProfessionsBookFrame_Update', ProfessionsBookFrameUpdate)
+	if type(FormatProfession) == 'function' then
+		hooksecurefunc('FormatProfession', FormatProfessionHook)
+	end
+	if type(ProfessionsBookFrame_Update) == 'function' then
+		hooksecurefunc('ProfessionsBookFrame_Update', ProfessionsBookFrameUpdate)
+	end
 end
 
 S:AddCallbackForAddon('Blizzard_ProfessionsBook')

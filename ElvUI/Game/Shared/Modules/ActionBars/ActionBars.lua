@@ -844,10 +844,12 @@ function AB:StyleButton(button, noBackdrop, useMasque, ignoreNormal)
 	end
 
 	if not AB.handledbuttons[button] then
-		E:RegisterCooldown(button.cooldown, 'actionbar')
+		if not E.Forever then
+			E:RegisterCooldown(button.cooldown, 'actionbar')
 
-		if button.AuraCooldown then
-			E:RegisterCooldown(button.AuraCooldown, 'targetaura')
+			if button.AuraCooldown then
+				E:RegisterCooldown(button.AuraCooldown, 'targetaura')
+			end
 		end
 
 		AB.handledbuttons[button] = true
@@ -1818,7 +1820,9 @@ function AB:LAB_FlyoutCreated(btn)
 end
 
 function AB:LAB_ChargeCreated(_, cd)
-	E:RegisterCooldown(cd, 'actionbar')
+	if not E.Forever then
+		E:RegisterCooldown(cd, 'actionbar')
+	end
 end
 
 function AB:LAB_MouseUp()

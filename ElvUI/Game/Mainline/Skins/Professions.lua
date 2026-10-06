@@ -367,17 +367,23 @@ function S:Blizzard_Professions()
 	if not (E.private.skins.blizzard.enable and E.private.skins.blizzard.tradeskill) then return end
 
 	local ProfessionsFrame = _G.ProfessionsFrame
+	if not ProfessionsFrame then return end
+
 	S:HandlePortraitFrame(ProfessionsFrame)
 
 	local CraftingPage = ProfessionsFrame.CraftingPage
-	S:HandleButton(CraftingPage.CreateButton)
-	S:HandleButton(CraftingPage.CreateAllButton)
-	S:HandleButton(CraftingPage.ViewGuildCraftersButton)
-	S:HandleIcon(CraftingPage.ConcentrationDisplay.Icon)
-	S:HandleEditBox(CraftingPage.MinimizedSearchBox)
+	if not CraftingPage then return end
 
-	HandleSchematicForm(CraftingPage.SchematicForm)
-	HandleInputBox(CraftingPage.CreateMultipleInputBox)
+	if CraftingPage.CreateButton then S:HandleButton(CraftingPage.CreateButton) end
+	if CraftingPage.CreateAllButton then S:HandleButton(CraftingPage.CreateAllButton) end
+	if CraftingPage.ViewGuildCraftersButton then S:HandleButton(CraftingPage.ViewGuildCraftersButton) end
+	if CraftingPage.ConcentrationDisplay and CraftingPage.ConcentrationDisplay.Icon then
+		S:HandleIcon(CraftingPage.ConcentrationDisplay.Icon)
+	end
+	if CraftingPage.MinimizedSearchBox then S:HandleEditBox(CraftingPage.MinimizedSearchBox) end
+
+	if CraftingPage.SchematicForm then HandleSchematicForm(CraftingPage.SchematicForm) end
+	if CraftingPage.CreateMultipleInputBox then HandleInputBox(CraftingPage.CreateMultipleInputBox) end
 
 	if CraftingPage.SetOverrideCastBarActive ~= E.noop then
 		CraftingPage.SetOverrideCastBarActive = E.noop
@@ -386,39 +392,50 @@ function S:Blizzard_Professions()
 	local InspectRecipe = _G.InspectRecipeFrame
 	if InspectRecipe then
 		S:HandleFrame(InspectRecipe)
-		HandleSchematicForm(InspectRecipe.SchematicForm, true)
+		if InspectRecipe.SchematicForm then
+			HandleSchematicForm(InspectRecipe.SchematicForm, true)
+		end
 	end
 
 	-- ToDo: No longer a function
 	-- hooksecurefunc('ToggleProfessionsItemFlyout', HandleProfessionsItemFlyout)
 
-	if E.global.general.disableTutorialButtons then
-		CraftingPage.TutorialButton:Kill()
-	else
-		CraftingPage.TutorialButton.Ring:Hide()
+	if CraftingPage.TutorialButton then
+		if E.global.general.disableTutorialButtons then
+			CraftingPage.TutorialButton:Kill()
+		elseif CraftingPage.TutorialButton.Ring then
+			CraftingPage.TutorialButton.Ring:Hide()
+		end
 	end
 
 	local CraftingRankBar = CraftingPage.RankBar
-	CraftingRankBar.Border:Hide()
-	CraftingRankBar.Background:Hide()
-	CraftingRankBar.Fill:CreateBackdrop()
-	CraftingRankBar.Rank.Text:FontTemplate()
+	if CraftingRankBar then
+		if CraftingRankBar.Border then CraftingRankBar.Border:Hide() end
+		if CraftingRankBar.Background then CraftingRankBar.Background:Hide() end
+		if CraftingRankBar.Fill then CraftingRankBar.Fill:CreateBackdrop() end
+		if CraftingRankBar.Rank and CraftingRankBar.Rank.Text then
+			CraftingRankBar.Rank.Text:FontTemplate()
+		end
 
-	if CraftingRankBar.ExpansionDropdownButton then
-		local arrow = CraftingRankBar.ExpansionDropdownButton:CreateTexture(nil, 'ARTWORK')
-		arrow:SetTexture(E.Media.Textures.ArrowUp)
-		arrow:Size(11)
-		arrow:Point('CENTER')
-		S:SetupArrow(arrow, 'down')
+		if CraftingRankBar.ExpansionDropdownButton then
+			local arrow = CraftingRankBar.ExpansionDropdownButton:CreateTexture(nil, 'ARTWORK')
+			arrow:SetTexture(E.Media.Textures.ArrowUp)
+			arrow:Size(11)
+			arrow:Point('CENTER')
+			S:SetupArrow(arrow, 'down')
 
-		S:HandleButton(CraftingRankBar.ExpansionDropdownButton)
+			S:HandleButton(CraftingRankBar.ExpansionDropdownButton)
+		end
 	end
 
 	local LinkButton = CraftingPage.LinkButton
 	if LinkButton then
-		LinkButton:GetNormalTexture():SetTexCoord(0.25, 0.7, 0.37, 0.75)
-		LinkButton:GetPushedTexture():SetTexCoord(0.25, 0.7, 0.45, 0.8)
-		LinkButton:GetHighlightTexture():Kill()
+		local normal = LinkButton.GetNormalTexture and LinkButton:GetNormalTexture()
+		local pushed = LinkButton.GetPushedTexture and LinkButton:GetPushedTexture()
+		local highlight = LinkButton.GetHighlightTexture and LinkButton:GetHighlightTexture()
+		if normal and normal.SetTexCoord then normal:SetTexCoord(0.25, 0.7, 0.37, 0.75) end
+		if pushed and pushed.SetTexCoord then pushed:SetTexCoord(0.25, 0.7, 0.45, 0.8) end
+		if highlight and highlight.Kill then highlight:Kill() end
 		LinkButton:SetTemplate()
 		LinkButton:Size(17, 14)
 	end
@@ -427,11 +444,15 @@ function S:Blizzard_Professions()
 	if GuildFrame then
 		GuildFrame:StripTextures()
 		GuildFrame:CreateBackdrop('Transparent')
-		GuildFrame.Container:StripTextures()
-		GuildFrame.Container:CreateBackdrop('Transparent')
+		if GuildFrame.Container then
+			GuildFrame.Container:StripTextures()
+			GuildFrame.Container:CreateBackdrop('Transparent')
+		end
 	end
 
-	S:HandleMaxMinFrame(ProfessionsFrame.MaximizeMinimize)
+	if ProfessionsFrame.MaximizeMinimize then
+		S:HandleMaxMinFrame(ProfessionsFrame.MaximizeMinimize)
+	end
 
 	local TabSystem = ProfessionsFrame.TabSystem
 	if TabSystem then

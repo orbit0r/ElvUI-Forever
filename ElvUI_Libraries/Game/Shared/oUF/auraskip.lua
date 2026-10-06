@@ -22,6 +22,9 @@ local auraFiltered = {
 	HARMFUL = {},
 	RAID = {}
 }
+-- Forever: IsAuraFilteredOutByInstanceID(PLAYER) is unreliable with secret
+-- auraInstanceIDs. Ownership comes from engine GetAuraSlots *|PLAYER instead.
+local playerOwnedByUnit = {}
 
 oUF.AuraInfo = auraInfo -- export it, not filtered
 oUF.AuraFiltered = auraFiltered -- by filter
@@ -53,6 +56,69 @@ local function InstanceFiltered(unit, aura, helpful, harmful)
 	return isHelpful or isHarmful
 end
 
+local function ForEachAuraSlot(unit, filter, callback)
+	local continuation
+	repeat
+		local results = { pcall(GetAuraSlots, unit, filter, nil, continuation) }
+		if not results[1] then return end
+		continuation = results[2]
+		for i = 3, #results do
+			local aura = GetAuraDataBySlot(unit, results[i])
+			if aura then callback(aura) end
+		end
+	until not continuation
+end
+
+local function RefreshPlayerOwned(unit)
+	local set = playerOwnedByUnit[unit]
+	if not set then
+		set = {}
+		playerOwnedByUnit[unit] = set
+	else
+		wipe(set)
+	end
+
+	if not oUF.isForever then return set end
+
+	local function mark(aura)
+		if aura and aura.auraInstanceID ~= nil then
+			set[aura.auraInstanceID] = true
+		end
+	end
+
+	-- Prefer index API: slot values can be secret and must not be boolean-tested.
+	if GetAuraDataByIndex then
+		for _, filter in ipairs({ 'HELPFUL|PLAYER', 'HARMFUL|PLAYER' }) do
+			for i = 1, 40 do
+				local ok, aura = pcall(GetAuraDataByIndex, unit, i, filter)
+				if not ok or aura == nil then break end
+				mark(aura)
+			end
+		end
+	else
+		ForEachAuraSlot(unit, 'HELPFUL|PLAYER', mark)
+		ForEachAuraSlot(unit, 'HARMFUL|PLAYER', mark)
+	end
+	return set
+end
+
+local function IsAuraFromPlayer(unit, aura)
+	if not aura then return false end
+
+	if oUF:NotSecretValue(aura.sourceUnit) and aura.sourceUnit then
+		return aura.sourceUnit == 'player' or aura.sourceUnit == 'vehicle'
+	end
+
+	if oUF.isForever then
+		local set = playerOwnedByUnit[unit]
+		if set and aura.auraInstanceID ~= nil and set[aura.auraInstanceID] then
+			return true
+		end
+	end
+
+	return InstanceFiltered(unit, aura, 'HELPFUL|PLAYER', 'HARMFUL|PLAYER')
+end
+
 local function UpdateFilter(which, filter, filtered, allow, unit, auraInstanceID, aura)
 	local unitAuraFiltered = filtered[unit]
 
@@ -66,7 +132,7 @@ local function UpdateFilter(which, filter, filtered, allow, unit, auraInstanceID
 		aura.auraIsCrowdControl = InstanceFiltered(unit, aura, 'HELPFUL|CROWD_CONTROL', 'HARMFUL|CROWD_CONTROL')
 		aura.auraIsBigDefensive = InstanceFiltered(unit, aura, 'HELPFUL|BIG_DEFENSIVE', 'HARMFUL|BIG_DEFENSIVE')
 		aura.auraIsExternalDefensive = InstanceFiltered(unit, aura, 'HELPFUL|EXTERNAL_DEFENSIVE', 'HARMFUL|EXTERNAL_DEFENSIVE')
-		aura.auraIsPlayer = InstanceFiltered(unit, aura, 'HELPFUL|PLAYER', 'HARMFUL|PLAYER')
+		aura.auraIsPlayer = IsAuraFromPlayer(unit, aura)
 		aura.auraIsRaid = InstanceFiltered(unit, aura, 'HELPFUL|RAID', 'HARMFUL|RAID')
 		aura.auraIsRaidInCombat = InstanceFiltered(unit, aura, 'HELPFUL|RAID_IN_COMBAT', 'HARMFUL|RAID_IN_COMBAT') -- Auras flagged to show on raid frames in combat
 		aura.auraIsRaidPlayerDispellable = InstanceFiltered(unit, aura, 'HELPFUL|RAID_PLAYER_DISPELLABLE', 'HARMFUL|RAID_PLAYER_DISPELLABLE') -- Auras with a dispel type the player can dispel
@@ -154,6 +220,19 @@ end
 local function ProcessExisting(frame, event, unit)
 	ProcessTokens(frame, event, unit, pcall(GetAuraSlots, unit, 'HELPFUL'))
 	ProcessTokens(frame, event, unit, pcall(GetAuraSlots, unit, 'HARMFUL'))
+
+	-- Forever: slot IDs can be secret (boolean-testing them taints/fails). Index walk is safer.
+	if oUF.isForever and GetAuraDataByIndex then
+		local function indexScan(filter)
+			for i = 1, 40 do
+				local ok, aura = pcall(GetAuraDataByIndex, unit, i, filter)
+				if not ok or aura == nil then break end
+				TryAdded('add', frame, event, unit, nil, aura)
+			end
+		end
+		indexScan('HELPFUL')
+		indexScan('HARMFUL')
+	end
 end
 
 local function ShouldSkipAura(frame, event, unit, updateInfo, showFunc)
@@ -161,7 +240,8 @@ local function ShouldSkipAura(frame, event, unit, updateInfo, showFunc)
 		oUF:CreateUnitAuraInfo(unit)
 	end
 
-	if event == 'UNIT_AURA' and updateInfo and not updateInfo.isFullUpdate then
+	if event == 'UNIT_AURA' and updateInfo and oUF:NotSecretValue(updateInfo.isFullUpdate) and not updateInfo.isFullUpdate then
+		RefreshPlayerOwned(unit)
 		-- these try functions will update the aura info table, so let them process before returning
 		local added = TrySkipAura('add', frame, event, unit, showFunc, TryAdded, updateInfo.addedAuras)
 		local updated = TrySkipAura('update', frame, event, unit, showFunc, TryUpdated, updateInfo.updatedAuraInstanceIDs)
@@ -175,6 +255,7 @@ local function ShouldSkipAura(frame, event, unit, updateInfo, showFunc)
 	elseif hasValidPlayer ~= false and event ~= 'ElvUI_UpdateAllElements' then -- skip in this case
 		oUF:ClearUnitAuraInfo(unit) -- clear these since we cant verify it
 
+		RefreshPlayerOwned(unit)
 		ProcessExisting(frame, event, unit) -- we need to collect full data here
 	end
 
@@ -186,6 +267,10 @@ function oUF:ClearUnitAuraInfo(unit)
 
 	for _, data in next, auraFiltered do
 		wipe(data[unit])
+	end
+
+	if playerOwnedByUnit[unit] then
+		wipe(playerOwnedByUnit[unit])
 	end
 end
 

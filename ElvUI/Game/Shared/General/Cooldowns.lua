@@ -39,6 +39,14 @@ function E:CooldownTextures(cooldown, texture, edge, swipe)
 	cooldown:SetDrawEdge(true)
 	cooldown:SetDrawSwipe(true)
 
+	if E.Forever then
+		-- Do not SetSwipeTexture. Empty string and blankTex both hide Forever duration swipes.
+		if cooldown.SetSwipeColor and swipe then
+			cooldown:SetSwipeColor(swipe.r, swipe.g, swipe.b, swipe.a)
+		end
+		return
+	end
+
 	cooldown:SetEdgeTexture(texture, edge.r, edge.g, edge.b, edge.a)
 	cooldown:SetSwipeTexture(E.media.blankTex, swipe.r, swipe.g, swipe.b, swipe.a)
 end

@@ -815,7 +815,7 @@ function UF:AuraFilter(element, unit, button, aura, name, icon, count, debuffTyp
 		button.priority = 0
 
 		return true
-	elseif E.Retail or button.useMidnight then
+	elseif (E.Retail and not E.Forever) or button.useMidnight then
 		button.priority = 0
 
 		return UF:VerifyFilter(button, aura)

@@ -105,9 +105,12 @@ do -- Expansions
 	E.Retail = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
 	E.Classic = WOW_PROJECT_ID == WOW_PROJECT_CLASSIC
 
-	-- Forever (1.60.x / Interface 16001): Mainline UI family, not WOW_PROJECT_MAINLINE
+	-- Forever (1.60.x). tocversion can be 16001 or a Mainline-like 12xxxx; version string is 1.60.*
 	local toc = tonumber(E.wowtoc) or 0
+	local patch = tostring(E.wowpatch or '')
 	E.Forever = toc == 16001 or (toc >= 16000 and toc < 20000)
+		or patch:find('^1%.60') ~= nil
+		or (C_SwingTimer ~= nil and Enum ~= nil and Enum.PlayerSwingType ~= nil)
 	if E.Forever then
 		E.Retail = true
 	end

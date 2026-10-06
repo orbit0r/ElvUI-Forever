@@ -230,12 +230,14 @@ function S:HandleButtonHighlight(frame, r, g, b)
 end
 
 function S:HandleFrame(frame, setBackdrop, template, x1, y1, x2, y2)
-	local name = frame and frame.GetName and frame:GetName()
-	local insetFrame = name and _G[name..'Inset'] or frame.Inset
-	local portraitFrame = name and _G[name..'Portrait'] or frame.Portrait or frame.portrait
-	local portraitFrameOverlay = name and _G[name..'PortraitOverlay'] or frame.PortraitOverlay
-	local artFrameOverlay = name and _G[name..'ArtOverlayFrame'] or frame.ArtOverlayFrame
-	local closeButton = frame.CloseButton or name and _G[name..'CloseButton']
+	if not frame then return end
+
+	local name = frame.GetName and frame:GetName()
+	local insetFrame = (name and _G[name..'Inset']) or frame.Inset
+	local portraitFrame = (name and _G[name..'Portrait']) or frame.Portrait or frame.portrait
+	local portraitFrameOverlay = (name and _G[name..'PortraitOverlay']) or frame.PortraitOverlay
+	local artFrameOverlay = (name and _G[name..'ArtOverlayFrame']) or frame.ArtOverlayFrame
+	local closeButton = frame.CloseButton or (name and _G[name..'CloseButton'])
 
 	frame:StripTextures()
 
@@ -1338,7 +1340,7 @@ do
 	end
 
 	function S:HandleMaxMinFrame(frame)
-		if frame.IsSkinned then return end
+		if not frame or frame.IsSkinned then return end
 
 		frame:StripTextures(true)
 

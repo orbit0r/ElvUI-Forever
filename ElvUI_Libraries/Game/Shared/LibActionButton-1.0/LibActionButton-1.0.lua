@@ -1,7 +1,7 @@
 -- License: LICENSE.txt
 
 local MAJOR_VERSION = "LibActionButton-1.0-ElvUI"
-local MINOR_VERSION = 76 -- the real minor version is 145
+local MINOR_VERSION = 87 -- the real minor version is 145
 
 local LibStub = LibStub
 if not LibStub then error(MAJOR_VERSION .. " requires LibStub.") end
@@ -14,7 +14,7 @@ local type, error, tostring, tonumber, assert, select, strsub = type, error, tos
 local setmetatable, wipe, unpack, pairs, ipairs, next, pcall = setmetatable, wipe, unpack, pairs, ipairs, next, pcall
 local hooksecurefunc, strmatch, format, tinsert, tremove = hooksecurefunc, strmatch, format, tinsert, tremove
 
-local _, _, _, wowtoc = GetBuildInfo()
+local gameVersion, _, _, wowtoc = GetBuildInfo()
 
 local WoWBCC = wowtoc >= 20000 and wowtoc < 30000
 local WoWRetail = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE)
@@ -22,11 +22,17 @@ local WoWClassic = (WOW_PROJECT_ID == WOW_PROJECT_CLASSIC)
 local WoWWrath = (WOW_PROJECT_ID == WOW_PROJECT_WRATH_CLASSIC)
 local WoWCata = (WOW_PROJECT_ID == WOW_PROJECT_CATACLYSM_CLASSIC)
 local WoWMists = (WOW_PROJECT_ID == WOW_PROJECT_MISTS_CLASSIC)
--- Forever (Interface 16001): Mainline UI family
+-- Forever: 1.60.x / Interface 16001. tocversion is not always 16001.
+local isForever = false
 do
 	local toc = tonumber(wowtoc) or 0
-	if toc == 16001 or (toc >= 16000 and toc < 20000) then
+	local ver = tostring(gameVersion or '')
+	if toc == 16001 or (toc >= 16000 and toc < 20000)
+		or ver:find('^1%.60')
+		or (C_SwingTimer and Enum and Enum.PlayerSwingType)
+	then
 		WoWRetail = true
+		isForever = true
 	end
 end
 
@@ -302,6 +308,13 @@ function lib:CreateButton(id, name, header, config)
 	button.cooldown:SetFrameStrata(button:GetFrameStrata())
 	button.cooldown:SetFrameLevel(button:GetFrameLevel() + 1)
 	button.cooldown:SetAllPoints(button.icon)
+	if isForever then
+		pcall(button.cooldown.SetSwipeTexture, button.cooldown, [[Interface\Buttons\WHITE8X8]])
+		if button.cooldown.SetDrawSwipe then button.cooldown:SetDrawSwipe(true) end
+		if button.cooldown.SetDrawEdge then button.cooldown:SetDrawEdge(false) end
+		if button.cooldown.SetDrawBling then button.cooldown:SetDrawBling(false) end
+		if button.cooldown.SetHideCountdownNumbers then button.cooldown:SetHideCountdownNumbers(true) end
+	end
 
 	local AuraCooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
 	AuraCooldown:SetDrawBling(false)
@@ -1550,6 +1563,10 @@ function InitializeEventHandler()
 	lib.eventFrame:RegisterEvent("LOSS_OF_CONTROL_ADDED")
 	lib.eventFrame:RegisterEvent("LOSS_OF_CONTROL_UPDATE")
 
+	if isForever then
+		pcall(lib.eventFrame.RegisterEvent, lib.eventFrame, 'PLAYER_SWING')
+	end
+
 	if WoWRetail then
 		lib.eventFrame:RegisterEvent("UNIT_SPELLCAST_SENT")
 		lib.eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
@@ -1774,6 +1791,10 @@ function OnEvent(_, event, arg1, arg2, arg3, arg4)
 				Update(button, event)
 			end
 		end
+	elseif event == "PLAYER_SWING" then
+		if ForeverOnPlayerSwing then
+			ForeverOnPlayerSwing(arg1, arg2)
+		end
 	elseif event == "SPELL_UPDATE_CHARGES" then
 		ForAllButtons(UpdateCount, true, event)
 	elseif event == "UPDATE_SUMMONPETS_ACTION" then
@@ -1792,18 +1813,24 @@ function OnEvent(_, event, arg1, arg2, arg3, arg4)
 		ForAllButtons(Update, true, event)
 	elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_PlaySpellInterruptedAnim)
+		if isForever and lib.EUI_ForeverPaintGCD then lib.EUI_ForeverPaintGCD(1.5) end
 	elseif event == "UNIT_SPELLCAST_START" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_PlaySpellCastAnim, ActionButtonCastType.Cast)
+		if isForever and lib.EUI_ForeverPaintGCD then lib.EUI_ForeverPaintGCD(1.5) end
 	elseif event == "UNIT_SPELLCAST_STOP" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_StopSpellCastAnim, true, ActionButtonCastType.Cast)
 		ForAllButtonsWithSpell(arg3, SpellVFX_StopTargettingReticleAnim)
+		if isForever then ForAllButtons(UpdateCooldown, true, event) end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_StopSpellCastAnim, false, ActionButtonCastType.Cast)
 		ForAllButtonsWithSpell(arg3, SpellVFX_StopTargettingReticleAnim)
+		if isForever and lib.EUI_ForeverPaintGCD then lib.EUI_ForeverPaintGCD(1.5) end
 	elseif event == "UNIT_SPELLCAST_SENT" then
 		ForAllButtonsWithSpell(arg4, SpellVFX_StopTargettingReticleAnim)
+		if isForever and lib.EUI_ForeverPaintGCD then lib.EUI_ForeverPaintGCD(1.5) end
 	elseif event == "UNIT_SPELLCAST_FAILED" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_StopTargettingReticleAnim)
+		if isForever then ForAllButtons(UpdateCooldown, true, event) end
 	elseif event == "UNIT_SPELLCAST_EMPOWER_START" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_PlaySpellCastAnim, ActionButtonCastType.Empowered)
 	elseif event == "UNIT_SPELLCAST_EMPOWER_STOP" then
@@ -1813,10 +1840,13 @@ function OnEvent(_, event, arg1, arg2, arg3, arg4)
 		else
 			ForAllButtonsWithSpell(arg3, SpellVFX_StopSpellCastAnim, interrupted, ActionButtonCastType.Empowered)
 		end
+		if isForever then ForAllButtons(UpdateCooldown, true, event) end
 	elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_PlaySpellCastAnim, ActionButtonCastType.Channel)
+		if isForever and lib.EUI_ForeverPaintGCD then lib.EUI_ForeverPaintGCD(1.5) end
 	elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_StopSpellCastAnim, false, ActionButtonCastType.Channel)
+		if isForever then ForAllButtons(UpdateCooldown, true, event) end
 	elseif event == "UNIT_SPELLCAST_RETICLE_TARGET" then
 		ForAllButtonsWithSpell(arg3, SpellVFX_PlayTargettingReticleAnim)
 	elseif event == "UNIT_SPELLCAST_RETICLE_CLEAR" then
@@ -1986,7 +2016,7 @@ do
 
 	function UpdateTargetAuras(event, arg1, arg2)
 		local isFriend = UnitIsFriend('player', 'target')
-		if event == 'UNIT_AURA' and arg2 and not arg2.isFullUpdate then
+		if event == 'UNIT_AURA' and arg2 and not (issecretvalue and issecretvalue(arg2.isFullUpdate)) and not arg2.isFullUpdate then
 			local filter = isFriend and 'HELPFUL' or 'HARMFUL'
 			ProcessTargetAuras('add', filter, arg2.addedAuras)
 			ProcessTargetAuras('update', filter, arg2.updatedAuraInstanceIDs)
@@ -2389,7 +2419,7 @@ local function CreateChargeCooldownFrame(parent)
 end
 
 local function StartChargeCooldown(parent, chargeStart, chargeDuration, chargeModRate)
-	if chargeStart == 0 then
+	if not (issecretvalue and issecretvalue(chargeStart)) and chargeStart == 0 then
 		ClearChargeCooldown(parent)
 		return
 	end
@@ -2423,8 +2453,247 @@ local defaultChargeInfo = { currentCharges = 0; maxCharges = 0; cooldownStartTim
 local defaultLossOfControlInfo = { startTime = 0; duration = 0; modRate = 0; isActive = false; shouldReplaceNormalCooldown = false; }
 
 local _, buildNumber = GetBuildInfo()
-local SecretCooldownsUseDuration = WoWRetail and tonumber(buildNumber) >= 66562
-if SecretCooldownsUseDuration then
+local SecretCooldownsUseDuration = WoWRetail and tonumber(buildNumber) >= 66562 and GetActionCooldownDuration and not isForever
+
+local function ApplyDurationObject(frame, durationObject)
+	if not frame then return end
+	if durationObject and frame.SetCooldownFromDurationObject then
+		frame:SetCooldownFromDurationObject(durationObject)
+		if frame.SetDrawSwipe then
+			frame:SetDrawSwipe(true)
+		end
+		frame:Show()
+	elseif frame.Clear then
+		frame:Clear()
+	end
+end
+
+-- Forever cooldown paint (EllesmereUI 9.3.8):
+--   C_ActionBar.GetActionCooldown + GetActionCooldownDuration + SetCooldownFromDurationObject
+--   isActive is NeverSecret; timing lives on the duration object.
+-- Swing: PLAYER_SWING + C_DurationUtil.CreateDuration():SetTimeFromStart (combat log is dead).
+local ForeverOnPlayerSwing
+
+if isForever then
+	local CreateDuration = C_DurationUtil and C_DurationUtil.CreateDuration
+	local swingDurObj = CreateDuration and CreateDuration()
+	local SWING = Enum and Enum.PlayerSwingType
+	local foreverCdPulseUntil = 0
+	local foreverCdFrame = CreateFrame('Frame')
+	local SWIPE_TEX = [[Interface\Buttons\WHITE8X8]]
+
+	-- Sibling cooldown: Blizzard/ElvUI skinning on button.cooldown can hide duration swipes.
+	local function EnsureForeverSwipe(self)
+		local swipe = self.euiForeverSwipe
+		if swipe then return swipe end
+		swipe = CreateFrame('Cooldown', nil, self, 'CooldownFrameTemplate')
+		swipe:SetHideCountdownNumbers(true)
+		if swipe.SetDrawEdge then swipe:SetDrawEdge(false) end
+		if swipe.SetDrawBling then swipe:SetDrawBling(false) end
+		if swipe.SetDrawSwipe then swipe:SetDrawSwipe(true) end
+		pcall(swipe.SetSwipeTexture, swipe, SWIPE_TEX)
+		if swipe.SetSwipeColor then swipe:SetSwipeColor(0, 0, 0, 0.85) end
+		swipe:SetAllPoints(self.icon or self)
+		swipe:SetFrameStrata(self:GetFrameStrata() or 'MEDIUM')
+		swipe:SetFrameLevel((self:GetFrameLevel() or 0) + 30)
+		swipe:Show()
+		self.euiForeverSwipe = swipe
+		if self.cooldown then
+			pcall(self.cooldown.SetDrawSwipe, self.cooldown, false)
+		end
+		return swipe
+	end
+
+	local function PrepareForeverCooldown(cd)
+		if not cd then return end
+		pcall(cd.SetSwipeTexture, cd, SWIPE_TEX)
+		if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+		if cd.SetDrawEdge then cd:SetDrawEdge(false) end
+		if cd.SetDrawBling then cd:SetDrawBling(false) end
+		if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
+		if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.85) end
+		cd:SetAlpha(1)
+		cd:Show()
+		return cd
+	end
+
+	local function ResolveAction(self)
+		local action = self._state_type == 'action' and self._state_action
+		if action then return action end
+		if self.GetAttribute then
+			return self:GetAttribute('action')
+		end
+	end
+
+	local function ApplySwipe(cd, durObj)
+		if not cd then return false end
+		PrepareForeverCooldown(cd)
+		if durObj and cd.SetCooldownFromDurationObject then
+			cd:SetCooldownFromDurationObject(durObj)
+			return true
+		end
+		return false
+	end
+
+	-- Never boolean-test cdInfo.isActive — it can be secret in combat and abort paint.
+	local function PaintForeverCooldown(self)
+		local cd = EnsureForeverSwipe(self)
+
+		local function hasLivePaint()
+			local now = GetTime()
+			return (cd._euiSwingUntil and now < cd._euiSwingUntil)
+				or (cd._euiGcdUntil and now < cd._euiGcdUntil)
+		end
+
+		local function paintAction(action)
+			if not (action and C_ActionBar and C_ActionBar.GetActionCooldownDuration) then
+				return false
+			end
+			local ok, durObj = pcall(C_ActionBar.GetActionCooldownDuration, action)
+			if ok and durObj then
+				return ApplySwipe(cd, durObj)
+			end
+			return false
+		end
+
+		local function paintSpell()
+			local spellID = self.GetSpellId and self:GetSpellId()
+			if not spellID or not C_Spell or not C_Spell.GetSpellCooldownDuration then
+				return false
+			end
+			local ok, durObj = pcall(C_Spell.GetSpellCooldownDuration, spellID)
+			if ok and durObj then
+				return ApplySwipe(cd, durObj)
+			end
+			return false
+		end
+
+		local painted = false
+		local ok, result = pcall(paintAction, ResolveAction(self))
+		painted = ok and result
+		if not painted then
+			ok, result = pcall(paintSpell)
+			painted = ok and result
+		end
+		-- Do NOT Clear while a cast-edge GCD / swing swipe is still playing.
+		-- Pulse used to wipe ForeverPaintGCD on the next frame.
+		if not painted and not hasLivePaint() and cd.Clear then
+			cd:Clear()
+		end
+		return painted
+	end
+
+	local function ArmForeverCooldownPulse(seconds)
+		foreverCdPulseUntil = GetTime() + (seconds or 1.5)
+		foreverCdFrame:Show()
+	end
+
+	local function ForEachActionButton(fn)
+		-- Prefer ActionButtons; fall back to full registry if empty.
+		local any = false
+		for button in next, ActionButtons do
+			any = true
+			fn(button)
+		end
+		if any then return end
+		for button in next, ActiveButtons do
+			any = true
+			fn(button)
+		end
+		if any then return end
+		for button in next, ButtonRegistry do
+			fn(button)
+		end
+	end
+
+	-- Cast edge: paint a GCD swipe on every action button (same path as /euiforever paint).
+	local gcdDurObj = CreateDuration and CreateDuration()
+	local function ForeverPaintGCD(seconds)
+		if not (gcdDurObj and gcdDurObj.SetTimeFromStart) then return end
+		seconds = seconds or 1.5
+		local untilTime = GetTime() + seconds
+		gcdDurObj:SetTimeFromStart(GetTime(), seconds)
+		ForEachActionButton(function(button)
+			local cd = EnsureForeverSwipe(button)
+			cd._euiGcdUntil = untilTime
+			ApplySwipe(cd, gcdDurObj)
+		end)
+		-- Refresh real duration objects if they appear; must not Clear over GCD.
+		ArmForeverCooldownPulse(seconds + 0.25)
+	end
+
+	lib.EUI_ForeverPaintGCD = ForeverPaintGCD
+
+	foreverCdFrame:Hide()
+	foreverCdFrame:SetScript('OnUpdate', function(self)
+		if GetTime() > foreverCdPulseUntil then
+			self:Hide()
+			return
+		end
+		ForEachActionButton(PaintForeverCooldown)
+	end)
+
+	function UpdateCooldown(self)
+		PaintForeverCooldown(self)
+		ArmForeverCooldownPulse(2)
+
+		if self.chargeCooldown and C_ActionBar and C_ActionBar.GetActionChargeDuration and self._state_type == 'action' then
+			local ok, obj = pcall(C_ActionBar.GetActionChargeDuration, self._state_action)
+			ApplyDurationObject(self.chargeCooldown, ok and obj)
+		end
+
+		lib.callbacks:Fire("OnCooldownUpdate", self)
+	end
+
+	ForeverOnPlayerSwing = function(dur, swingType)
+		if (issecretvalue and (issecretvalue(dur) or issecretvalue(swingType))) then return end
+		if type(dur) ~= 'number' or dur ~= dur or dur <= 0 then return end
+		if not swingDurObj or not swingDurObj.SetTimeFromStart then return end
+
+		swingDurObj:SetTimeFromStart(GetTime(), dur)
+
+		local wantMelee = SWING and (swingType == SWING.MainHand or swingType == SWING.OffHand)
+		local wantRange = SWING and swingType == SWING.Ranged
+		if not wantMelee and not wantRange then
+			wantMelee = true
+		end
+
+		ForEachActionButton(function(button)
+			local kind
+			local okAttack, isAttack = pcall(button.IsAttack, button)
+			if okAttack and isAttack then
+				kind = 'melee'
+			else
+				local okRepeat, isRepeat = pcall(button.IsAutoRepeat, button)
+				if okRepeat and isRepeat then
+					kind = 'ranged'
+				end
+			end
+			if (kind == 'melee' and wantMelee) or (kind == 'ranged' and wantRange) then
+				local cd = EnsureForeverSwipe(button)
+				cd._euiSwingUntil = GetTime() + dur
+				ApplySwipe(cd, swingDurObj)
+			end
+		end)
+	end
+
+	lib.EUI_ForceForeverSwipe = function(button, seconds)
+		if not button then return false end
+		local cd = EnsureForeverSwipe(button)
+		seconds = seconds or 1.5
+		cd._euiGcdUntil = GetTime() + seconds
+		if CreateDuration then
+			local dur = CreateDuration()
+			dur:SetTimeFromStart(GetTime(), seconds)
+			return ApplySwipe(cd, dur)
+		elseif cd.SetCooldown then
+			PrepareForeverCooldown(cd)
+			cd:SetCooldown(GetTime(), seconds)
+			return true
+		end
+		return false
+	end
+elseif SecretCooldownsUseDuration then
 	local function SetOrClearCooldown(cooldown, shouldShow, durationObject)
 		if not cooldown then return end
 		if not shouldShow or not durationObject then
@@ -2491,20 +2760,26 @@ else
 			lossOfControlInfo.modRate = cooldownInfo.modRate
 		end
 
-		if not self.config.lossOfControlCooldown or not lossOfControlInfo or not lossOfControlInfo.startTime or not lossOfControlInfo.duration then
-			lossOfControlInfo = defaultLossOfControlInfo
+		if not isForever then
+			if not self.config.lossOfControlCooldown or not lossOfControlInfo or not lossOfControlInfo.startTime or not lossOfControlInfo.duration then
+				lossOfControlInfo = defaultLossOfControlInfo
+			end
+
+			if not cooldownInfo or not cooldownInfo.startTime or not cooldownInfo.duration then
+				cooldownInfo = defaultCooldownInfo
+			end
+
+			if not chargeInfo or not chargeInfo.maxCharges or not chargeInfo.currentCharges or not chargeInfo.cooldownStartTime or not chargeInfo.cooldownDuration then
+				chargeInfo = defaultChargeInfo
+			end
+		else
+			if not cooldownInfo then cooldownInfo = defaultCooldownInfo end
+			if not chargeInfo then chargeInfo = defaultChargeInfo end
+			if not lossOfControlInfo then lossOfControlInfo = defaultLossOfControlInfo end
 		end
 
-		if not cooldownInfo or not cooldownInfo.startTime or not cooldownInfo.duration then
-			cooldownInfo = defaultCooldownInfo
-		end
-
-		if not chargeInfo or not chargeInfo.maxCharges or not chargeInfo.currentCharges or not chargeInfo.cooldownStartTime or not chargeInfo.cooldownDuration then
-			chargeInfo = defaultChargeInfo
-		end
-
-		-- 12.0 helper function
-		if ActionButton_ApplyCooldown then
+		-- 12.0 helper. Skip on Forever — it does not draw the swipe spiral.
+		if ActionButton_ApplyCooldown and not isForever then
 			ActionButton_ApplyCooldown(self.cooldown, cooldownInfo, self.chargeCooldown, chargeInfo, self.lossOfControlCooldown, lossOfControlInfo)
 
 			lib.callbacks:Fire("OnCooldownUpdate", self, nil, nil, nil, cooldownInfo, chargeInfo, lossOfControlInfo)
@@ -2513,9 +2788,17 @@ else
 			local start, duration, enable, modRate = cooldownInfo.startTime, cooldownInfo.duration, cooldownInfo.isEnabled, cooldownInfo.modRate
 			local charges, maxCharges, chargeStart, chargeDuration, chargeModRate = chargeInfo.currentCharges, chargeInfo.maxCharges, chargeInfo.cooldownStartTime, chargeInfo.cooldownDuration, chargeInfo.chargeModRate
 
-			local hasLocCooldown = locStart and locDuration and locStart > 0 and locDuration > 0
-			local hasCooldown = enable and start and duration and start > 0 and duration > 0
-			if hasLocCooldown and ((not hasCooldown) or ((locStart + locDuration) > (start + duration))) then
+			local function canTest(v)
+				return not (issecretvalue and issecretvalue(v))
+			end
+			local function isPositive(v)
+				return canTest(v) and v and v > 0
+			end
+
+			local secretTimes = not canTest(start) or not canTest(duration) or not canTest(enable)
+			local hasLocCooldown = isPositive(locStart) and isPositive(locDuration)
+			local hasCooldown = secretTimes or (enable and isPositive(start) and isPositive(duration))
+			if hasLocCooldown and ((not hasCooldown) or (canTest(locStart) and canTest(locDuration) and canTest(start) and canTest(duration) and ((locStart + locDuration) > (start + duration)))) then
 				if self.cooldown.currentCooldownType ~= _G.COOLDOWN_TYPE_LOSS_OF_CONTROL then
 					self.cooldown.currentCooldownType = _G.COOLDOWN_TYPE_LOSS_OF_CONTROL
 				end
@@ -2530,12 +2813,16 @@ else
 
 				self.cooldown:SetScript("OnCooldownDone", OnCooldownDone, hasLocCooldown)
 
-				if charges and maxCharges and maxCharges > 1 and charges < maxCharges then
+				if canTest(charges) and canTest(maxCharges) and maxCharges and maxCharges > 1 and charges < maxCharges then
 					StartChargeCooldown(self, chargeStart, chargeDuration, chargeModRate)
 				else
 					ClearChargeCooldown(self)
 				end
 				CooldownFrame_Set(self.cooldown, start, duration, enable, false, modRate)
+			end
+
+			if self.cooldown and self.cooldown.SetDrawSwipe then
+				self.cooldown:SetDrawSwipe(true)
 			end
 
 			lib.callbacks:Fire("OnCooldownUpdate", self, start, duration, modRate)
@@ -3182,6 +3469,14 @@ if GetActionChargeDuration then
 end
 if GetActionCooldownDuration then
 	Action.GetCooldownDuration  = function(self) return GetActionCooldownDuration(self._state_action) end
+elseif C_Spell and C_Spell.GetSpellCooldownDuration then
+	-- Forever: action-slot duration API missing; spell duration objects still work
+	Action.GetCooldownDuration = function(self)
+		local spellID = self.GetSpellId and self:GetSpellId()
+		if spellID then
+			return C_Spell.GetSpellCooldownDuration(spellID)
+		end
+	end
 end
 if GetActionLossOfControlCooldownDuration then
 	Action.GetLoCCooldownDuration = function(self) return GetActionLossOfControlCooldownDuration(self._state_action) end
